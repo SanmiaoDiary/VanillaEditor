@@ -75,23 +75,11 @@ VanillaEditor/
 
 ### 前端
 
-1. **先确认后端 API 路径再写前端调用**，参考 `app/routes.py` 里的路由定义
-2. Pinia store 里的 ref 可以直接赋值（Vue 3 setup 语法糖自动解包），不需要 `.value`
-3. 调用 API 时用 `import api from '@/api'`，不要直接 import axios
-4. 前端开发时启动两个服务：
-   ```bash
-   # 终端 1
-   python run.py
-   # 终端 2
-   cd frontend && npm run dev
-   ```
-5. 前端开发完成后构建：
-   ```bash
-   cd frontend && npm run build
-   # 产物输出到 static/，脚本会自动修正 index.html 的脚本引用
-   ```
-6. 静态资源（CSS/JS）CDN 加载，无需本地安装
-7. **注意**：Windows 上 Vite 构建有 hash 漂移问题，`npm run build` 已内置清理和修复脚本，无需手动处理
+1. **单文件架构**：前端全部代码在 `static/index.html`，通过 CDN 加载 Vue 3、Vue Router、Pinia、axios、marked，无构建步骤
+2. **无需 npm/vite**：没有 Node.js 依赖，不需要 `npm install` 或 `npm run build`
+3. 调用 API 用全局 `api` 对象（已封装 axios + JWT 自动注入）
+4. 修改界面直接在 `static/index.html` 里改对应组件的代码
+5. **注意**：Windows 浏览器可能缓存 HTML，修改后需 Ctrl+Shift+R 刷新
 
 ### Git 操作（后端）
 
@@ -112,27 +100,16 @@ VanillaEditor/
 
 ### 添加新前端页面
 
-1. 在 `frontend/src/views/` 创建 `.vue` 文件
-2. 在 `frontend/src/router/index.js` 注册路由
-3. 重新构建：`cd frontend && npm run build`
+直接在 `static/index.html` 的脚本中定义新组件并注册到 router。
 
 ### 修改样式
-
-直接改 `frontend/index.html` 里的 `<style>` 块（全局暗色主题已定义 CSS 变量）
 
 ---
 
 ## 启动命令
 
 ```bash
-# 后端
 python run.py
-
-# 前端（开发模式，热更新）
-cd frontend && npm run dev
-
-# 前端（生产构建）
-cd frontend && npm run build
 ```
 
-访问：`http://localhost:5173`（Vite 代理 API）或 `http://localhost:5000`（生产模式）
+访问：`http://localhost:5000`（生产模式）或局域网内其他设备访问 `http://<本机IP>:5000`
