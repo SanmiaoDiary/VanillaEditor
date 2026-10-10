@@ -17,6 +17,7 @@ export default defineConfig({
   },
   build: {
     outDir: '../static',
-    emptyOutDir: true
+    emptyOutDir: true,
+    manifest: false
   }
 })
