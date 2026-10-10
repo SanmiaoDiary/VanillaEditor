@@ -88,9 +88,10 @@ VanillaEditor/
 5. 前端开发完成后构建：
    ```bash
    cd frontend && npm run build
-   # 产物输出到 static/
+   # 产物输出到 static/，脚本会自动修正 index.html 的脚本引用
    ```
 6. 静态资源（CSS/JS）CDN 加载，无需本地安装
+7. **注意**：Windows 上 Vite 构建有 hash 漂移问题，`npm run build` 已内置清理和修复脚本，无需手动处理
 
 ### Git 操作（后端）
 
