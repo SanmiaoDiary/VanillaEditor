@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node ../clean-static.mjs && vite build && node ../fix-index.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
