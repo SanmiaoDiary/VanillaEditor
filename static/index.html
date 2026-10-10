@@ -1,398 +1,677 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VanillaEditor</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" />
-  <style>
-    :root {
-      --bg-primary: #1e1e1e;
-      --bg-secondary: #252526;
-      --bg-tertiary: #2d2d2d;
-      --bg-hover: #3a3d41;
-      --bg-active: #37373d;
-      --text-primary: #cccccc;
-      --text-secondary: #858585;
-      --accent: #0e639c;
-      --accent-hover: #1177bb;
-      --border: #3e3e42;
-      --statusbar-bg: #007acc;
-      --activitybar-bg: #333333;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: 'Segoe UI', sans-serif;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      height: 100vh;
-      overflow: hidden;
-      font-size: 13px;
-    }
-    #app { height: 100vh; display: flex; flex-direction: column; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VanillaEditor</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css">
+<style>
+:root{--bg:#1e1e1e;--bg2:#252526;--bg3:#2d2d2d;--hover:#3a3d41;--active:#37373d;--text:#ccc;--text2:#858585;--accent:#0e639c;--border:#3e3e42;--status:#007acc;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:13px;height:100vh;overflow:hidden}
+#app{height:100vh;display:flex;flex-direction:column}
 
-    /* Menu Bar */
-    .menu-bar {
-      display: flex;
-      align-items: center;
-      height: 30px;
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border);
-      padding: 0 8px;
-      user-select: none;
-    }
-    .menu-bar .logo { font-weight: bold; color: #4ec9b0; margin-right: 16px; font-size: 13px; }
-    .menu-bar .menu-item {
-      padding: 2px 8px;
-      cursor: pointer;
-      border-radius: 3px;
-      color: var(--text-primary);
-    }
-    .menu-bar .menu-item:hover { background: var(--bg-hover); }
-    .menu-bar .tabs {
-      margin-left: auto;
-      display: flex;
-      gap: 2px;
-    }
-    .menu-bar .tab {
-      padding: 2px 10px;
-      background: var(--bg-primary);
-      border-radius: 3px 3px 0 0;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-    }
-    .menu-bar .tab .close-tab { opacity: 0; font-size: 10px; }
-    .menu-bar .tab:hover .close-tab { opacity: 1; }
+/* Menu */
+.menu{display:flex;align-items:center;height:30px;background:var(--bg2);border-bottom:1px solid var(--border);padding:0 8px;user-select:none;font-size:13px}
+.menu .logo{color:#4ec9b0;font-weight:bold;margin-right:16px}
+.menu .mi{padding:2px 8px;border-radius:3px;cursor:pointer}
+.menu .mi:hover{background:var(--hover)}
+.menu .tabs{margin-left:auto;display:flex;gap:2px}
+.menu .tab{padding:2px 10px;background:var(--bg);border-radius:3px 3px 0 0;font-size:12px;display:flex;align-items:center;gap:6px}
+.menu .tab .unsaved{color:#e2c08d}
 
-    /* Main area */
-    .main-area {
-      display: flex;
-      flex: 1;
-      overflow: hidden;
-    }
+/* Main */
+.main{display:flex;flex:1;overflow:hidden}
 
-    /* Activity Bar */
-    .activity-bar {
-      width: 48px;
-      background: var(--activitybar-bg);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding-top: 8px;
-      gap: 4px;
-    }
-    .activity-bar .icon-btn {
-      width: 48px;
-      height: 48px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      color: var(--text-secondary);
-      font-size: 20px;
-      position: relative;
-      border-left: 2px solid transparent;
-    }
-    .activity-bar .icon-btn:hover { color: var(--text-primary); }
-    .activity-bar .icon-btn.active {
-      color: var(--text-primary);
-      border-left-color: var(--text-primary);
-    }
-    .activity-bar .icon-btn .badge {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      background: var(--accent);
-      color: white;
-      font-size: 9px;
-      border-radius: 50%;
-      width: 16px;
-      height: 16px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
+/* Activity Bar */
+.abar{width:48px;background:#333;display:flex;flex-direction:column;align-items:center;padding-top:8px;gap:4px}
+.abar .ib{width:48px;height:48px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);font-size:20px;border-left:2px solid transparent}
+.abar .ib:hover{color:var(--text)}
+.abar .ib.on{color:var(--text);border-left-color:var(--text)}
+.abar .ib .badge{position:absolute;top:8px;right:8px;background:var(--accent);color:#fff;font-size:9px;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center}
 
-    /* Sidebar */
-    .sidebar {
-      width: 220px;
-      background: var(--bg-secondary);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .sidebar-header {
-      padding: 8px 12px;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: var(--text-secondary);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .sidebar-content { flex: 1; overflow-y: auto; padding: 4px 0; }
-    .sidebar-content::-webkit-scrollbar { width: 6px; }
-    .sidebar-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+/* Sidebar */
+.sidebar{width:220px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.sidebar .sh{padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text2);display:flex;justify-content:space-between;align-items:center}
+.sidebar .sc{flex:1;overflow-y:auto;padding:4px 0}
+.sidebar .sc::-webkit-scrollbar{width:6px}
+.sidebar .sc::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.ti{display:flex;align-items:center;padding:3px 12px;cursor:pointer;gap:4px;font-size:13px}
+.ti:hover{background:var(--hover)}
+.ti.on{background:var(--active)}
+.ti .arr{font-size:10px;width:12px;color:var(--text2)}
+.ti .ic{font-size:14px}
+.ti .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ti .dot{width:6px;height:6px;border-radius:50%;background:#e2c08d;display:inline-block}
 
-    /* Editor area */
-    .editor-area {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .editor-tabs {
-      display: flex;
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border);
-      min-height: 35px;
-    }
-    .editor-tab {
-      padding: 6px 12px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      border-right: 1px solid var(--border);
-      background: var(--bg-primary);
-    }
-    .editor-tab.active { background: var(--bg-primary); border-bottom: 1px solid var(--bg-primary); margin-bottom: -1px; }
-    .editor-tab .unsaved { color: #e2c08d; }
-    .editor-body {
-      flex: 1;
-      display: flex;
-      overflow: hidden;
-    }
-    .editor-split {
-      flex: 1;
-      display: flex;
-      overflow: hidden;
-    }
-    .editor-pane { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
-    .preview-pane { flex: 1; overflow: auto; padding: 16px; background: var(--bg-primary); }
-    .preview-pane h1, .preview-pane h2, .preview-pane h3 { color: var(--text-primary); border-bottom: 1px solid var(--border); padding-bottom: 4px; }
-    .preview-pane code { background: var(--bg-tertiary); padding: 2px 5px; border-radius: 3px; font-size: 12px; }
-    .preview-pane pre { background: var(--bg-tertiary); padding: 12px; border-radius: 6px; overflow-x: auto; }
-    .preview-pane pre code { background: none; padding: 0; }
-    .preview-pane blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--text-secondary); }
-    .preview-pane table { border-collapse: collapse; width: 100%; margin: 8px 0; }
-    .preview-pane th, .preview-pane td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
-    .preview-pane th { background: var(--bg-tertiary); }
+/* Editor area */
+.eara{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.etabs{display:flex;background:var(--bg2);border-bottom:1px solid var(--border);min-height:35px}
+.etab{padding:6px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:12px;border-right:1px solid var(--border)}
+.etab.on{background:var(--bg);border-bottom:1px solid var(--bg);margin-bottom:-1px}
+.ediv{flex:1;display:flex;overflow:hidden}
+.epane{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.ppane{flex:1;overflow:auto;padding:16px;background:var(--bg)}
+.ppane h1,.ppane h2,.ppane h3{color:var(--text);border-bottom:1px solid var(--border);padding-bottom:4px;margin-bottom:8px}
+.ppane h4,.ppane h5,.ppane h6{color:var(--text);margin-bottom:6px}
+.ppane code{background:var(--bg3);padding:2px 5px;border-radius:3px;font-size:12px;font-family:'JetBrains Mono',Consolas,monospace}
+.ppane pre{background:var(--bg3);padding:12px;border-radius:6px;overflow-x:auto;margin:8px 0}
+.ppane pre code{background:none;padding:0}
+.ppane blockquote{border-left:3px solid var(--accent);padding-left:12px;color:var(--text2);margin:8px 0}
+.ppane table{border-collapse:collapse;width:100%;margin:8px 0}
+.ppane th,.ppane td{border:1px solid var(--border);padding:6px 10px;text-align:left}
+.ppane th{background:var(--bg3)}
+.ppane ul,.ppane ol{padding-left:20px;margin:4px 0}
+.ppane li{margin:2px 0}
+.ppane a{color:var(--accent)}
+.ppane hr{border-color:var(--border);margin:12px 0}
 
-    /* Status Bar */
-    .status-bar {
-      height: 22px;
-      background: var(--statusbar-bg);
-      display: flex;
-      align-items: center;
-      padding: 0 10px;
-      font-size: 11px;
-      color: white;
-      gap: 16px;
-    }
-    .status-bar .right { margin-left: auto; }
+/* Status bar */
+.sbar{height:22px;background:var(--status);display:flex;align-items:center;padding:0 10px;font-size:11px;color:#fff;gap:16px}
+.sbar .r{margin-left:auto}
 
-    /* File tree */
-    .tree-item {
-      display: flex;
-      align-items: center;
-      padding: 3px 12px;
-      cursor: pointer;
-      gap: 4px;
-      font-size: 13px;
-    }
-    .tree-item:hover { background: var(--bg-hover); }
-    .tree-item.active { background: var(--bg-active); }
-    .tree-item .arrow { font-size: 10px; width: 12px; color: var(--text-secondary); }
-    .tree-item .icon { font-size: 14px; }
-    .tree-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .tree-item .dot { width: 6px; height: 6px; border-radius: 50%; background: #e2c08d; display: inline-block; }
+/* Git panel */
+.gp{padding:12px}
+.gp .st{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text2);margin:8px 0 6px;display:flex;align-items:center;gap:6px}
+.gp .cnt{background:var(--hover);border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:10px}
+.gp .ci{display:flex;align-items:center;padding:4px 8px;border-radius:3px;cursor:pointer;gap:8px;font-size:12px}
+.gp .ci:hover{background:var(--hover)}
+.gp .ci .st{width:16px;text-align:center;font-weight:bold}
+.gp .ci .st.ok{color:#89d185}
+.gp .ci .st.ch{color:#e2c08d}
+.gp .ci .pa{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gp textarea{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:4px;resize:vertical;min-height:60px;font-family:inherit;font-size:12px}
+.gp textarea:focus{outline:none;border-color:var(--accent)}
+.gp .btns{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.gp .sync-row{display:flex;align-items:center;gap:8px;margin-top:8px}
+.gp .ci2{display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px}
+.gp .ci2:hover{background:var(--hover)}
+.gp .ci2 .dot{width:8px;height:8px;border-radius:50%;background:var(--text2)}
+.gp .ci2 .msg{flex:1}
+.gp .ci2 .tm{color:var(--text2);font-size:11px}
 
-    /* Login */
-    .login-container {
-      height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--bg-primary);
-    }
-    .login-box {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 40px;
-      width: 360px;
-      text-align: center;
-    }
-    .login-box h2 { color: #4ec9b0; margin-bottom: 24px; }
-    .login-box .form-control {
-      background: var(--bg-primary);
-      border-color: var(--border);
-      color: var(--text-primary);
-    }
-    .login-box .form-control:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 1px var(--accent);
-      background: var(--bg-primary);
-      color: var(--text-primary);
-    }
-    .login-box .btn-primary {
-      background: var(--accent);
-      border-color: var(--accent);
-    }
-    .login-box .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+/* Sync / settings pages */
+.pg{padding:20px}
+.pg h4{color:var(--text);margin-bottom:16px}
+.pg .card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:12px}
+.pg .card-title{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--text2);margin-bottom:12px}
+.pg label{font-size:12px;color:var(--text2)}
+.pg .form-control,.pg .form-select{background:var(--bg);border-color:var(--border);color:var(--text)}
+.pg .form-control:focus,.pg .form-select:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);color:var(--text)}
 
-    /* Git panel */
-    .git-panel { padding: 12px; }
-    .git-panel .section-title {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: var(--text-secondary);
-      margin-bottom: 8px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .git-panel .section-title .count {
-      background: var(--bg-hover);
-      border-radius: 50%;
-      width: 18px;
-      height: 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 10px;
-    }
-    .git-panel .change-item {
-      display: flex;
-      align-items: center;
-      padding: 4px 8px;
-      border-radius: 3px;
-      cursor: pointer;
-      gap: 8px;
-      font-size: 12px;
-    }
-    .git-panel .change-item:hover { background: var(--bg-hover); }
-    .git-panel .change-item .st { width: 16px; text-align: center; font-weight: bold; }
-    .git-panel .change-item .st.staged { color: #89d185; }
-    .git-panel .change-item .st.modified { color: #e2c08d; }
-    .git-panel .change-item .path { flex: 1; }
-    .git-panel .change-item .stats { color: var(--text-secondary); font-size: 11px; }
-    .git-panel .commit-msg {
-      width: 100%;
-      background: var(--bg-primary);
-      border: 1px solid var(--border);
-      color: var(--text-primary);
-      padding: 8px;
-      border-radius: 4px;
-      resize: vertical;
-      min-height: 60px;
-      font-family: inherit;
-      font-size: 12px;
-    }
-    .git-panel .commit-msg:focus { outline: none; border-color: var(--accent); }
-    .git-panel .commit-actions {
-      display: flex;
-      gap: 8px;
-      margin-top: 8px;
-      flex-wrap: wrap;
-    }
-    .git-panel .commit-actions .btn { font-size: 12px; padding: 3px 10px; }
-    .git-panel .sync-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 8px;
-    }
-    .git-panel .commit-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 4px 8px;
-      border-radius: 3px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    .git-panel .commit-item:hover { background: var(--bg-hover); }
-    .git-panel .commit-item .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary); }
-    .git-panel .commit-item.active .dot { background: var(--accent); }
-    .git-panel .commit-item .msg { flex: 1; }
-    .git-panel .commit-item .time { color: var(--text-secondary); font-size: 11px; }
+/* Login */
+.lc{height:100vh;display:flex;align-items:center;justify-content:center}
+.lb{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:40px;width:360px;text-align:center}
+.lb h2{color:#4ec9b0;margin-bottom:24px}
+.lb .form-control{background:var(--bg);border-color:var(--border);color:var(--text)}
+.lb .form-control:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);color:var(--text)}
+.lb .btn-primary{background:var(--accent);border-color:var(--accent)}
+.lb .btn-primary:hover{background:#1177bb;border-color:#1177bb}
 
-    /* Monaco editor wrapper */
-    .monaco-wrapper { flex: 1; overflow: hidden; }
-    .monaco-wrapper .resize-handle {
-      width: 4px;
-      cursor: col-resize;
-      background: var(--border);
-      transition: background 0.2s;
-    }
-    .monaco-wrapper .resize-handle:hover { background: var(--accent); }
+/* Toast */
+.tt{position:fixed;bottom:30px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+.tt .ti2{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px 16px;font-size:13px;display:flex;align-items:center;gap:8px;min-width:200px;animation:sIn .2s ease}
+.tt .ti2.ok{border-left:3px solid #89d185}
+.tt .ti2.err{border-left:3px solid #f14c4c}
+.tt .ti2.info{border-left:3px solid #3b86f6}
+@keyframes sIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
 
-    /* Scrollbar */
-    ::-webkit-scrollbar { width: 8px; height: 8px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: #555; }
+/* Editor textarea */
+.ed{flex:1;width:100%;background:var(--bg);color:#d4d4d4;border:none;resize:none;outline:none;padding:12px 16px;font-family:'JetBrains Mono','Fira Code',Consolas,monospace;font-size:14px;line-height:1.6;tab-size:2}
 
-    /* Button overrides */
-    .btn-git {
-      background: var(--accent);
-      border-color: var(--accent);
-      color: white;
-      font-size: 12px;
-      padding: 3px 10px;
-    }
-    .btn-git:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: white; }
-    .btn-git:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-secondary-git {
-      background: var(--bg-tertiary);
-      border-color: var(--border);
-      color: var(--text-primary);
-      font-size: 12px;
-      padding: 3px 10px;
-    }
-    .btn-secondary-git:hover { background: var(--bg-hover); color: var(--text-primary); }
+/* Scrollbar */
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:#555}
 
-    /* Toast */
-    .ve-toast {
-      position: fixed;
-      bottom: 30px;
-      right: 16px;
-      z-index: 9999;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .ve-toast .toast-item {
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 10px 16px;
-      font-size: 13px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 200px;
-      animation: slideIn 0.2s ease;
-    }
-    .ve-toast .toast-item.success { border-left: 3px solid #89d185; }
-    .ve-toast .toast-item.error { border-left: 3px solid #f14c4c; }
-    .ve-toast .toast-item.info { border-left: 3px solid #3b86f6; }
-    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-  </style>
-  <script type="module" crossorigin src="/assets/index-CeLHt6d4.js?v=1791638228717"></script>
+/* Buttons */
+.bg{background:var(--accent);border-color:var(--accent);color:#fff;font-size:12px;padding:3px 10px}
+.bg:hover{background:#1177bb;border-color:#1177bb;color:#fff}
+.bg:disabled{opacity:.5;cursor:not-allowed}
+.bs{background:var(--bg3);border-color:var(--border);color:var(--text);font-size:12px;padding:3px 10px}
+.bs:hover{background:var(--hover);color:var(--text)}
+</style>
 </head>
 <body>
-  <div id="app"></div>
+<div id="app">
+  <router-view></router-view>
+  <teleport to="body"><div class="tt"><div v-for="t in toasts" :key="t.id" class="ti2" :class="t.type">{{ t.msg }}<i class="bi bi-x" style="margin-left:auto;cursor:pointer" @click="dismiss(t.id)"></i></div></div></teleport>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/vue@3.4.21/dist/vue.global.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vue-router@4.3.0/dist/vue-router.global.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pinia@2.1.7/dist/pinia.iife.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/axios@1.6.7/dist/axios.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+
+<script>
+const { createApp, ref, computed, onMounted, watch, h } = Vue;
+const { createPinia, defineStore } = Pinia;
+const { createRouter, createWebHashHistory } = VueRouter;
+
+// ── API ──────────────────────────────────────────────────────
+const api = axios.create({ baseURL: '/api', timeout: 10000 });
+api.interceptors.request.use(c => {
+  const t = localStorage.getItem('ve_token');
+  if (t) c.headers.Authorization = 'Bearer ' + t;
+  return c;
+});
+api.interceptors.response.use(r => r, e => {
+  if (e.response?.status === 401) { localStorage.removeItem('ve_token'); window.location.hash = '#/login'; }
+  return Promise.reject(e);
+});
+
+// ── Stores ───────────────────────────────────────────────────
+const useAuth = defineStore('auth', () => {
+  const token = ref(localStorage.getItem('ve_token') || '');
+  const username = ref(localStorage.getItem('ve_username') || '');
+  const isLoggedIn = computed(() => !!token.value);
+  function login(tok, user) { token.value = tok; username.value = user; localStorage.setItem('ve_token', tok); localStorage.setItem('ve_username', user); }
+  function logout() { token.value = ''; username.value = ''; localStorage.removeItem('ve_token'); localStorage.removeItem('ve_username'); }
+  return { token, username, isLoggedIn, login, logout };
+});
+
+const useEditor = defineStore('editor', () => {
+  const activeDocId = ref('');
+  const activeFilePath = ref('');
+  const content = ref('');
+  const fileSha = ref('');
+  const gitBranch = ref('main');
+  const unsaved = ref(false);
+  return { activeDocId, activeFilePath, content, fileSha, gitBranch, unsaved };
+});
+
+// ── Components ───────────────────────────────────────────────
+
+const MenuBar = {
+  setup() {
+    const auth = useAuth();
+    const editor = useEditor();
+    const panels = { files: true, git: false };
+    const emit = Vue.defineEmits(['menu']);
+    return () => h('div', { class: 'menu' }, [
+      h('span', { class: 'logo' }, '🌿 VE'),
+      h('span', { class: 'mi', onClick: () => emit('menu', 'files') }, '文件'),
+      h('span', { class: 'mi', onClick: () => emit('menu', 'git') }, 'Git'),
+      h('span', { class: 'mi', onClick: () => emit('menu', 'settings') }, '设置'),
+      h('div', { class: 'tabs' }, [
+        editor.activeFilePath ? h('div', { class: 'tab' }, [
+          h('span', {}, editor.activeFilePath.split('/').pop()),
+          editor.unsaved ? h('span', { class: 'unsaved' }, '●') : null
+        ]) : null
+      ]),
+      h('span', { class: 'mi', style: 'margin-left:auto', onClick: () => emit('menu', 'logout') }, '👤 ' + auth.username.value)
+    ]);
+  }
+};
+
+const ActivityBar = {
+  setup() {
+    const active = ref('files');
+    const emit = Vue.defineEmits(['panel']);
+    const editor = useEditor();
+    const changedCount = computed(() => 0);
+    const icons = [
+      { id: 'files', icon: 'bi-folder' },
+      { id: 'git',   icon: 'bi-git' },
+      { id: 'search', icon: 'bi-search' },
+      { id: 'settings', icon: 'bi-gear' }
+    ];
+    return () => h('div', { class: 'abar' }, icons.map(x =>
+      h('div', {
+        class: ['ib', { on: active.value === x.id }],
+        onClick: () => { active.value = x.id; emit('panel', x.id); }
+      }, [
+        h('i', { class: x.icon }),
+        x.id === 'git' && changedCount.value > 0 ? h('span', { class: 'badge' }, changedCount.value) : null
+      ].filter(Boolean))
+    ));
+  }
+};
+
+const Sidebar = {
+  props: ['files'],
+  emits: ['file-click'],
+  setup(props, { emit }) {
+    const expanded = ref({});
+    const editor = useEditor();
+    const toggle = id => expanded.value = { ...expanded.value, [id]: !expanded.value[id] };
+    return () => h('div', { class: 'sidebar' }, [
+      h('div', { class: 'sh' }, [h('span', {}, '资源管理器'), h('i', { class: 'bi bi-plus-lg', style: 'cursor:pointer' })]),
+      h('div', { class: 'sc' }, props.files.length === 0
+        ? [h('div', { style: 'padding:12px;font-size:12px;color:#858585' }, '暂无文档')]
+        : props.files.flatMap(doc => [
+            h('div', { class: ['ti', { on: expanded.value[doc.id] }], onClick: () => toggle(doc.id) }, [
+              h('span', { class: 'arr' }, expanded.value[doc.id] ? '▼' : '▶'),
+              h('span', { class: 'ic' }, '📁'),
+              h('span', { class: 'nm' }, doc.name),
+              h('span', { style: 'font-size:10px;color:#858585' }, doc.file_count)
+            ]),
+            expanded.value[doc.id] && doc.children.map(f =>
+              h('div', {
+                class: ['ti', { on: editor.activeDocId === doc.id && editor.activeFilePath === f.path }],
+                onClick: () => emit('file-click', doc.id, f.path)
+              }, [
+                h('span', { class: 'arr' }, ''),
+                h('span', { class: 'ic' }, f.path.endsWith('.md') ? '📝' : '📄'),
+                h('span', { class: 'nm' }, f.path.split('/').pop())
+              ])
+            )
+          ])
+      )
+    ]);
+  }
+};
+
+const GitPanel = {
+  props: ['docs'],
+  emits: ['refresh'],
+  setup(props, { emit }) {
+    const commitMsg = ref('');
+    const loading = ref(false);
+    const selectedRemote = ref('');
+    const remotes = ref([]);
+    const commits = ref([]);
+
+    async function load() {
+      const did = Vue.useEditor ? Vue.useEditor().activeDocId : null;
+      if (!did) return;
+      try { const r = await api.get('/sync/remote', { data: { doc_id: did } }); remotes.value = r.data; } catch {}
+      try { const r = await api.get('/history/' + did); commits.value = r.data; } catch {}
+    }
+
+    async function pull() {
+      const did = Vue.useEditor ? Vue.useEditor().activeDocId : null;
+      if (!did) return;
+      loading.value = true;
+      try { await api.post('/sync/pull', { doc_id: did }); emit('refresh'); } catch(e) { Vue.toast('拉取失败', 'err'); }
+      loading.value = false;
+    }
+
+    async function doCommit() {
+      const did = Vue.useEditor ? Vue.useEditor().activeDocId : null;
+      if (!did || !commitMsg.value.trim()) return;
+      loading.value = true;
+      try { await api.post('/commit', { doc_id: did, message: commitMsg.value }); commitMsg.value = ''; emit('refresh'); load(); }
+      catch(e) { Vue.toast('提交失败', 'err'); }
+      loading.value = false;
+    }
+
+    async function push() {
+      const did = Vue.useEditor ? Vue.useEditor().activeDocId : null;
+      if (!did) return;
+      loading.value = true;
+      try { await api.post('/sync/push', { doc_id: did }); emit('refresh'); } catch(e) { Vue.toast('推送失败', 'err'); }
+      loading.value = false;
+    }
+
+    async function syncTo() {
+      const did = Vue.useEditor ? Vue.useEditor().activeDocId : null;
+      if (!did || !selectedRemote.value) return;
+      loading.value = true;
+      try {
+        await api.post('/sync/push', { doc_id: did, remote: selectedRemote.value });
+        await api.post('/sync/pull', { doc_id: did, remote: selectedRemote.value });
+        emit('refresh');
+      } catch(e) { Vue.toast('同步失败', 'err'); }
+      loading.value = false;
+    }
+
+    watch(() => Vue.useEditor ? Vue.useEditor().activeDocId : '', load);
+    onMounted(load);
+
+    const editor = Vue.useEditor();
+    const changed = computed(() => editor ? editor.changedFiles || [] : []);
+
+    return () => h('div', { class: 'gp' }, [
+      h('div', { style: { fontWeight:'bold', marginBottom:'12px' } }, [h('i', { class:'bi-git' }), ' 版本管理 | Git']),
+
+      h('button', { class:'btn bg', disabled: loading.value, onClick: pull }, [h('i', { class:'bi bi-arrow-down' }), ' 拉取']),
+      h('br'),
+      h('button', { class:'btn bs', disabled: loading.value || changed.value.length === 0, onClick: () => {} }, [h('i', { class:'bi bi-plus-circle' }), ' 提交当前所有更改到暂存区']),
+      h('div', { style:{margin:'8px 0',fontSize:'12px',color:'#858585'} }, '提交信息：'),
+      h('textarea', {
+        value: commitMsg.value,
+        onInput: e => commitMsg.value = e.target.value,
+        placeholder: '描述本次更改...'
+      }),
+      h('div', { class:'btns' }, [
+        h('button', { class:'btn bg', disabled: loading.value || !commitMsg.value.trim(), onClick: doCommit }, [h('i', { class:'bi bi-check-circle' }), ' 提交']),
+        h('button', { class:'btn bs', disabled: loading.value, onClick: push }, [h('i', { class:'bi bi-arrow-up' }), ' 推送'])
+      ]),
+      h('div', { class:'sync-row' }, [
+        h('span', { style:{fontSize:'12px'} }, '同步到'),
+        h('select', {
+          class:'form-select form-select-sm',
+          style:{background:'var(--bg)',color:'var(--text)',borderColor:'var(--border)',flex:1},
+          value: selectedRemote.value,
+          onInput: e => selectedRemote.value = e.target.value
+        }, [
+          h('option', { value: '' }, '选择目标...'),
+          ...remotes.value.map(r => h('option', { value: r.name }, r.name)),
+          h('option', { value: '__all' }, '所有设备')
+        ]),
+        h('button', { class:'btn bs', disabled: loading.value || !selectedRemote.value, onClick: syncTo }, [h('i', { class:'bi bi-arrows-move' }), ' 同步'])
+      ]),
+
+      h('div', { style:{marginTop:'16px',fontSize:'11px',textTransform:'uppercase',letterSpacing:'1px',color:'#858585'} }, '最近提交'),
+      ...commits.value.map(c =>
+        h('div', { class:'ci2' }, [
+          h('span', { class:'dot' }),
+          h('span', { class:'msg' }, c.message),
+          h('span', { class:'tm' }, c.date ? c.date.split('T')[0] : '')
+        ])
+      ),
+      commits.value.length === 0 ? h('div', { style:{fontSize:'12px',color:'#858585',padding:'4px 0'} }, '暂无提交记录') : null
+    ]);
+  }
+};
+
+const EditorPane = {
+  props: ['content'],
+  emits: ['change'],
+  setup(props, { emit }) {
+    const textarea = ref(null);
+    return () => h('textarea', {
+      ref: textarea,
+      class: 'ed',
+      value: props.content,
+      spellcheck: false,
+      onInput: e => emit('change', e.target.value)
+    });
+  }
+};
+
+const PreviewPane = {
+  props: ['content'],
+  setup() {
+    const html = computed(() => typeof marked !== 'undefined' ? marked.parse(Vue.toValue(Vue.resolveProps)['content'] || '') : '');
+    return () => h('div', { class: 'ppane', innerHTML: html.value });
+  }
+};
+
+const StatusBar = {
+  props: ['branch', 'sha', 'unsaved'],
+  setup() {
+    const time = ref(new Date().toLocaleTimeString());
+    setInterval(() => { time.value = new Date().toLocaleTimeString(); }, 1000);
+    return () => h('div', { class: 'sbar' }, [
+      h('span', {}, h('i', { class: 'bi bi-git' }), ' ', Vue.toValue(Vue.resolveProps)['branch']),
+      Vue.toValue(Vue.resolveProps)['sha'] ? h('span', {}, Vue.toValue(Vue.resolveProps)['sha'].slice(0,7)) : null,
+      Vue.toValue(Vue.resolveProps)['unsaved'] ? h('span', { style:{color:'#e2c08d'} }, '● 有未保存更改') : null,
+      h('span', { class:'r' }, 'VanillaEditor v0.1.0'),
+      h('span', { class:'r' }, time.value)
+    ]);
+  }
+};
+
+const ToastComp = {
+  setup() { return () => null; }
+};
+
+// ── Views ────────────────────────────────────────────────────
+
+const LoginView = {
+  setup() {
+    const auth = useAuth();
+    const router = Vue.router;
+    const username = ref('');
+    const password = ref('');
+    const confirmPassword = ref('');
+    const error = ref('');
+    const loading = ref(false);
+    const isRegister = ref(false);
+
+    onMounted(async () => {
+      if (auth.isLoggedIn) { router.push('/editor'); return; }
+      try {
+        const r = await api.get('/auth/me');
+        if (r.data.username) { auth.login('', r.data.username); router.push('/editor'); }
+      } catch {}
+    });
+
+    async function submit() {
+      error.value = '';
+      if (isRegister.value && confirmPassword.value !== password.value) { error.value = '两次输入的密码不一致'; return; }
+      loading.value = true;
+      try {
+        if (isRegister.value) {
+          await api.post('/auth/init', { username: username.value, password: password.value });
+          const r = await api.post('/auth/login', { username: username.value, password: password.value });
+          auth.login(r.data.token, r.data.username);
+        } else {
+          const r = await api.post('/auth/login', { username: username.value, password: password.value });
+          auth.login(r.data.token, r.data.username);
+        }
+        router.push('/editor');
+      } catch(e) { error.value = e.response?.data?.error || '操作失败'; }
+      finally { loading.value = false; }
+    }
+
+    return () => h('div', { class: 'lc' }, [
+      h('div', { class: 'lb' }, [
+        h('h2', {}, '🌿 VanillaEditor'),
+        h('p', { style: { fontSize:'12px', color:'#858585', marginBottom:'24px' } }, '分布式离线 Markdown 编辑器'),
+        h('form', { onSubmit: e => { e.preventDefault(); submit(); } }, [
+          h('div', { class: 'mb-3' }, [h('input', { class:'form-control', type:'text', placeholder:'用户名', value: username.value, onInput: e => username.value = e.target.value, required: true, autofocus: true })]),
+          h('div', { class: 'mb-3' }, [h('input', { class:'form-control', type:'password', placeholder:'密码', value: password.value, onInput: e => password.value = e.target.value, required: true })]),
+          isRegister.value ? h('div', { class: 'mb-3' }, [
+            h('input', { class:'form-control', type:'password', placeholder:'确认密码', value: confirmPassword.value, onInput: e => confirmPassword.value = e.target.value, required: true }),
+            confirmPassword.value && confirmPassword.value !== password.value ? h('div', { style:{fontSize:'11px',color:'#f14c4c',marginTop:'4px'} }, '两次输入的密码不一致') : null
+          ]) : null,
+          error.value ? h('div', { style:{fontSize:'12px',color:'#f14c4c',marginBottom:'12px'} }, error.value) : null,
+          h('button', { class:'btn btn-primary w-100 mb-2', disabled: loading.value, type:'submit' }, loading.value ? '处理中...' : (isRegister.value ? '注册' : '登录')),
+          h('button', {
+            class: 'btn btn-link w-100',
+            style: { fontSize:'12px', color:'#858585' },
+            type:'button',
+            onClick: () => { isRegister.value = !isRegister.value; error.value = ''; username.value = ''; password.value = ''; confirmPassword.value = ''; }
+          }, isRegister.value ? '已有账号？返回登录' : '还没有账号？点击注册')
+        ])
+      ])
+    ]);
+  }
+};
+
+const LayoutView = {
+  setup() {
+    const auth = useAuth();
+    const editor = useEditor();
+    const activePanel = ref('files');
+    const files = ref([]);
+    const docs = ref([]);
+    const toasts = ref([]);
+    const previewContent = ref('');
+    let saveTimer = null;
+
+    function toast(msg, type = 'info') {
+      const id = Date.now();
+      toasts.value.push({ id, msg, type });
+      setTimeout(() => { toasts.value = toasts.value.filter(t => t.id !== id); }, 3000);
+    }
+
+    async function loadFiles() {
+      try {
+        const r = await api.get('/docs');
+        docs.value = r.data;
+        files.value = r.data.flatMap(d => (d.children || []).map(f => ({ ...f, docId: d.id })));
+        if (r.data.length > 0 && !editor.activeDocId) {
+          const first = r.data[0];
+          editor.activeDocId = first.id;
+          editor.gitBranch = 'main';
+          if (first.children?.length > 0) await openFile(first.id, first.children[0].path);
+        }
+      } catch(e) { console.error(e); }
+    }
+
+    async function openFile(docId, filePath) {
+      editor.activeDocId = docId;
+      editor.activeFilePath = filePath;
+      try {
+        const r = await api.get(`/files/${docId}/${encodeURIComponent(filePath)}`);
+        editor.content = r.data.content;
+        editor.fileSha = r.data.sha;
+        editor.unsaved = false;
+        previewContent.value = r.data.content;
+      } catch(e) { toast('无法打开文件', 'err'); }
+    }
+
+    function onEditorChange(val) {
+      editor.content = val;
+      editor.unsaved = true;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(async () => {
+        if (!editor.activeDocId || !editor.activeFilePath) return;
+        try {
+          await api.put(`/files/${editor.activeDocId}/${encodeURIComponent(editor.activeFilePath)}`, { content: val });
+          editor.unsaved = false;
+          toast('已保存', 'ok');
+        } catch(e) { toast('保存失败', 'err'); }
+      }, 1500);
+    }
+
+    async function handleMenu(action) {
+      if (action === 'git') activePanel.value = activePanel.value === 'git' ? 'files' : 'git';
+      else if (action === 'files') activePanel.value = activePanel.value === 'files' ? '' : 'files';
+      else if (action === 'logout') { auth.logout(); window.location.reload(); }
+      else if (action === 'settings') { /* TODO */ }
+    }
+
+    onMounted(loadFiles);
+
+    return () => h('div', { style: { display:'flex', flexDirection:'column', height:'100vh', overflow:'hidden' } }, [
+      h(MenuBar, { 'onMenu-click': handleMenu }),
+      h('div', { class: 'main' }, [
+        activePanel.value === 'files' ? h(ActivityBar, { activePanel: activePanel.value, 'onPanel-change': p => activePanel.value = p }) : null,
+        activePanel.value === 'files' ? h(Sidebar, { files: docs.value, 'onFile-click': openFile }) : null,
+        activePanel.value === 'git' ? h(GitPanel, { docs: docs.value, 'onRefresh': loadFiles }) : null,
+        h('div', { class: 'eara' }, [
+          editor.activeFilePath ? h('div', { class: 'etabs' }, [
+            h('div', { class: 'etab on' }, [
+              h('span', {}, editor.activeFilePath.split('/').pop()),
+              editor.unsaved ? h('span', { style: { color:'#e2c08d' } }, '●') : null
+            ])
+          ]) : null,
+          h('div', { class: 'ediv' }, [
+            activePanel.value !== 'git' ? h(EditorPane, {
+              content: editor.content,
+              onChange: onEditorChange
+            }) : null,
+            activePanel.value !== 'git' ? h('div', { class: 'ppane', style: { flex:1, overflow:'auto', padding:'16px', background:'var(--bg)' } }, [
+              typeof marked !== 'undefined' ? h('div', { innerHTML: marked.parse(editor.content || '') }) : null
+            ]) : null
+          ])
+        ])
+      ]),
+      h(StatusBar, { branch: editor.gitBranch, sha: editor.fileSha, unsaved: editor.unsaved })
+    ]);
+  }
+};
+
+const SettingsView = {
+  setup() {
+    return () => h('div', { style: { padding:'20px' } }, [
+      h('h4', { style: { color:'var(--text)' } }, '设置'),
+      h('div', { class: 'card' }, [
+        h('div', { class: 'card-title' }, '编辑器'),
+        h('div', { style: { marginBottom:'8px' } }, [
+          h('label', {}, '字体大小 '),
+          h('select', { class:'form-select form-select-sm d-inline', style:{background:'var(--bg)',color:'var(--text)',borderColor:'var(--border)',width:'80px'}, defaultValue:'14' },
+            [h('option', {value:'12'}, '12px'), h('option', {value:'14'}, '14px'), h('option', {value:'16'}, '16px'), h('option', {value:'18'}, '18px')]
+          )
+        ]),
+        h('div', {}, [
+          h('label', {}, '主题 '),
+          h('span', { style:{marginLeft:'8px'} }, '暗色（默认）')
+        ])
+      ]),
+      h('div', { class: 'card' }, [
+        h('div', { class: 'card-title' }, '关于'),
+        h('div', { style:{fontSize:'12px',color:'var(--text2)'} }, 'VanillaEditor v0.1.0\n数据完全存储在本地，不上传任何第三方服务器')
+      ])
+    ]);
+  }
+};
+
+const SyncView = {
+  setup() {
+    const editor = useEditor();
+    const remotes = ref([]);
+    const newUrl = ref('');
+
+    async function load() {
+      if (!editor.activeDocId) return;
+      try { const r = await api.get('/sync/remote', { data: { doc_id: editor.activeDocId } }); remotes.value = r.data; } catch {}
+    }
+
+    async function addRemote() {
+      if (!editor.activeDocId || !newUrl.value) return;
+      try {
+        await api.post('/sync/remote', { doc_id: editor.activeDocId, name: 'remote', url: newUrl.value });
+        newUrl.value = '';
+        load();
+      } catch(e) { alert('添加失败'); }
+    }
+
+    watch(() => editor.activeDocId, load, { immediate: true });
+
+    return () => h('div', { class: 'pg' }, [
+      h('h4', {}, '同步设置'),
+      h('div', { class: 'card' }, [
+        h('div', { class: 'card-title' }, '远程设备'),
+        h('div', { style:{fontSize:'13px',color:'var(--text2)',marginBottom:'12px'} }, '将其他设备的 VE 地址添加为 Git 远端，即可进行端到端同步。'),
+        h('div', { style:{display:'flex',gap:'8px',marginBottom:'12px'} }, [
+          h('input', {
+            class:'form-control', style:{background:'var(--bg)',color:'var(--text)',borderColor:'var(--border)'},
+            placeholder:'http://192.168.1.x:5000',
+            value: newUrl.value,
+            onInput: e => newUrl.value = e.target.value
+          }),
+          h('button', { class:'btn bg', onClick: addRemote }, '+ 添加')
+        ]),
+        remotes.value.length === 0 ? h('div', { style:{fontSize:'12px',color:'var(--text2)'} }, '暂无远端设备') :
+          remotes.value.map(r => h('div', { style:{display:'flex',alignItems:'center',gap:'8px',padding:'6px 0',fontSize:'13px'} }, [
+            h('i', { class:'bi bi-hdd-network' }),
+            h('span', {}, r.name + ' — ' + r.url),
+            h('button', { class:'btn bs btn-sm', style:{marginLeft:'auto'} }, '删除')
+          ]))
+      ])
+    ]);
+  }
+};
+
+// ── Router ───────────────────────────────────────────────────
+const router = createRouter({
+  history: createWebHashHistory(),
+  routes: [
+    { path: '/login',         component: LoginView },
+    { path: '/',              component: LayoutView, redirect: '/editor' },
+    { path: '/editor',        component: LayoutView },
+    { path: '/sync',          component: SyncView },
+    { path: '/settings',      component: SettingsView }
+  ]
+});
+
+router.beforeEach((to) => {
+  const auth = useAuth();
+  if (to.path !== '/login' && !auth.isLoggedIn) return '/login';
+});
+
+// ── App ──────────────────────────────────────────────────────
+const app = createApp({
+  setup() {
+    Vue.useEditor = useEditor;
+    return () => null;
+  }
+});
+
+app.use(createPinia());
+app.use(router);
+app.config.globalProperties.$toast = () => {};
+app.mount('#app');
+</script>
 </body>
 </html>
