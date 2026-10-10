@@ -7,7 +7,6 @@ const assetsDir = join(staticDir, 'assets')
 
 function findMainJs() {
   const files = readdirSync(assetsDir)
-  // 找最小的 index-*.js（主入口），排除 sourcemap
   const candidates = files
     .filter(f => f.startsWith('index-') && f.endsWith('.js') && !f.endsWith('.map'))
     .sort((a, b) => statSync(join(assetsDir, a)).size - statSync(join(assetsDir, b)).size)
@@ -22,14 +21,15 @@ if (!mainJs) {
 
 const htmlPath = join(staticDir, 'index.html')
 let html = readFileSync(htmlPath, 'utf-8')
-const oldRef = html.match(/src="\/assets\/index-[^"]+\.js"/)
-if (oldRef) {
-  html = html.replace(oldRef[0], `src="/assets/${mainJs}"`)
-  writeFileSync(htmlPath, html, 'utf-8')
-  console.log(`[fix-index] index.html 已更新: ${mainJs}`)
-} else {
-  console.log('[fix-index] index.html 无需更新')
-}
+
+// 替换脚本引用，并加 ?v= 防止浏览器缓存
+html = html.replace(/src="\/assets\/index-[^?"]+(?:\?[^"]*)?"/, (match) => {
+  const base = match.match(/src="([^"]+)"/)[1]
+  return `src="${base}?v=${Date.now()}"`
+})
+
+writeFileSync(htmlPath, html, 'utf-8')
+console.log(`[fix-index] index.html 已更新: ${mainJs}`)
 
 // 清理旧的 index-*.js 文件（保留最新的一个）
 const indexFiles = readdirSync(assetsDir)
@@ -39,4 +39,5 @@ for (const f of indexFiles.slice(0, -1)) {
   unlinkSync(join(assetsDir, f))
   console.log(`[fix-index] 已删除旧 chunk: ${f}`)
 }
+
 
