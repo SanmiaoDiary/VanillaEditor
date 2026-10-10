@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VanillaEditor</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.css" />
+  <style>
+    :root {
+      --bg-primary: #1e1e1e;
+      --bg-secondary: #252526;
+      --bg-tertiary: #2d2d2d;
+      --bg-hover: #3a3d41;
+      --bg-active: #37373d;
+      --text-primary: #cccccc;
+      --text-secondary: #858585;
+      --accent: #0e639c;
+      --accent-hover: #1177bb;
+      --border: #3e3e42;
+      --statusbar-bg: #007acc;
+      --activitybar-bg: #333333;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      height: 100vh;
+      overflow: hidden;
+      font-size: 13px;
+    }
+    #app { height: 100vh; display: flex; flex-direction: column; }
+
+    /* Menu Bar */
+    .menu-bar {
+      display: flex;
+      align-items: center;
+      height: 30px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      padding: 0 8px;
+      user-select: none;
+    }
+    .menu-bar .logo { font-weight: bold; color: #4ec9b0; margin-right: 16px; font-size: 13px; }
+    .menu-bar .menu-item {
+      padding: 2px 8px;
+      cursor: pointer;
+      border-radius: 3px;
+      color: var(--text-primary);
+    }
+    .menu-bar .menu-item:hover { background: var(--bg-hover); }
+    .menu-bar .tabs {
+      margin-left: auto;
+      display: flex;
+      gap: 2px;
+    }
+    .menu-bar .tab {
+      padding: 2px 10px;
+      background: var(--bg-primary);
+      border-radius: 3px 3px 0 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+    }
+    .menu-bar .tab .close-tab { opacity: 0; font-size: 10px; }
+    .menu-bar .tab:hover .close-tab { opacity: 1; }
+
+    /* Main area */
+    .main-area {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* Activity Bar */
+    .activity-bar {
+      width: 48px;
+      background: var(--activitybar-bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 8px;
+      gap: 4px;
+    }
+    .activity-bar .icon-btn {
+      width: 48px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--text-secondary);
+      font-size: 20px;
+      position: relative;
+      border-left: 2px solid transparent;
+    }
+    .activity-bar .icon-btn:hover { color: var(--text-primary); }
+    .activity-bar .icon-btn.active {
+      color: var(--text-primary);
+      border-left-color: var(--text-primary);
+    }
+    .activity-bar .icon-btn .badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: var(--accent);
+      color: white;
+      font-size: 9px;
+      border-radius: 50%;
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 220px;
+      background: var(--bg-secondary);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .sidebar-header {
+      padding: 8px 12px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-secondary);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .sidebar-content { flex: 1; overflow-y: auto; padding: 4px 0; }
+    .sidebar-content::-webkit-scrollbar { width: 6px; }
+    .sidebar-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* Editor area */
+    .editor-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .editor-tabs {
+      display: flex;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      min-height: 35px;
+    }
+    .editor-tab {
+      padding: 6px 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      border-right: 1px solid var(--border);
+      background: var(--bg-primary);
+    }
+    .editor-tab.active { background: var(--bg-primary); border-bottom: 1px solid var(--bg-primary); margin-bottom: -1px; }
+    .editor-tab .unsaved { color: #e2c08d; }
+    .editor-body {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+    .editor-split {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+    .editor-pane { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+    .preview-pane { flex: 1; overflow: auto; padding: 16px; background: var(--bg-primary); }
+    .preview-pane h1, .preview-pane h2, .preview-pane h3 { color: var(--text-primary); border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+    .preview-pane code { background: var(--bg-tertiary); padding: 2px 5px; border-radius: 3px; font-size: 12px; }
+    .preview-pane pre { background: var(--bg-tertiary); padding: 12px; border-radius: 6px; overflow-x: auto; }
+    .preview-pane pre code { background: none; padding: 0; }
+    .preview-pane blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--text-secondary); }
+    .preview-pane table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+    .preview-pane th, .preview-pane td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+    .preview-pane th { background: var(--bg-tertiary); }
+
+    /* Status Bar */
+    .status-bar {
+      height: 22px;
+      background: var(--statusbar-bg);
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      font-size: 11px;
+      color: white;
+      gap: 16px;
+    }
+    .status-bar .right { margin-left: auto; }
+
+    /* File tree */
+    .tree-item {
+      display: flex;
+      align-items: center;
+      padding: 3px 12px;
+      cursor: pointer;
+      gap: 4px;
+      font-size: 13px;
+    }
+    .tree-item:hover { background: var(--bg-hover); }
+    .tree-item.active { background: var(--bg-active); }
+    .tree-item .arrow { font-size: 10px; width: 12px; color: var(--text-secondary); }
+    .tree-item .icon { font-size: 14px; }
+    .tree-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tree-item .dot { width: 6px; height: 6px; border-radius: 50%; background: #e2c08d; display: inline-block; }
+
+    /* Login */
+    .login-container {
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-primary);
+    }
+    .login-box {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 40px;
+      width: 360px;
+      text-align: center;
+    }
+    .login-box h2 { color: #4ec9b0; margin-bottom: 24px; }
+    .login-box .form-control {
+      background: var(--bg-primary);
+      border-color: var(--border);
+      color: var(--text-primary);
+    }
+    .login-box .form-control:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+    }
+    .login-box .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .login-box .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+    /* Git panel */
+    .git-panel { padding: 12px; }
+    .git-panel .section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .git-panel .section-title .count {
+      background: var(--bg-hover);
+      border-radius: 50%;
+      width: 18px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+    }
+    .git-panel .change-item {
+      display: flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .git-panel .change-item:hover { background: var(--bg-hover); }
+    .git-panel .change-item .st { width: 16px; text-align: center; font-weight: bold; }
+    .git-panel .change-item .st.staged { color: #89d185; }
+    .git-panel .change-item .st.modified { color: #e2c08d; }
+    .git-panel .change-item .path { flex: 1; }
+    .git-panel .change-item .stats { color: var(--text-secondary); font-size: 11px; }
+    .git-panel .commit-msg {
+      width: 100%;
+      background: var(--bg-primary);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      padding: 8px;
+      border-radius: 4px;
+      resize: vertical;
+      min-height: 60px;
+      font-family: inherit;
+      font-size: 12px;
+    }
+    .git-panel .commit-msg:focus { outline: none; border-color: var(--accent); }
+    .git-panel .commit-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    .git-panel .commit-actions .btn { font-size: 12px; padding: 3px 10px; }
+    .git-panel .sync-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .git-panel .commit-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .git-panel .commit-item:hover { background: var(--bg-hover); }
+    .git-panel .commit-item .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary); }
+    .git-panel .commit-item.active .dot { background: var(--accent); }
+    .git-panel .commit-item .msg { flex: 1; }
+    .git-panel .commit-item .time { color: var(--text-secondary); font-size: 11px; }
+
+    /* Monaco editor wrapper */
+    .monaco-wrapper { flex: 1; overflow: hidden; }
+    .monaco-wrapper .resize-handle {
+      width: 4px;
+      cursor: col-resize;
+      background: var(--border);
+      transition: background 0.2s;
+    }
+    .monaco-wrapper .resize-handle:hover { background: var(--accent); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+    /* Button overrides */
+    .btn-git {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+      font-size: 12px;
+      padding: 3px 10px;
+    }
+    .btn-git:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: white; }
+    .btn-git:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary-git {
+      background: var(--bg-tertiary);
+      border-color: var(--border);
+      color: var(--text-primary);
+      font-size: 12px;
+      padding: 3px 10px;
+    }
+    .btn-secondary-git:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+    /* Toast */
+    .ve-toast {
+      position: fixed;
+      bottom: 30px;
+      right: 16px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .ve-toast .toast-item {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 16px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 200px;
+      animation: slideIn 0.2s ease;
+    }
+    .ve-toast .toast-item.success { border-left: 3px solid #89d185; }
+    .ve-toast .toast-item.error { border-left: 3px solid #f14c4c; }
+    .ve-toast .toast-item.info { border-left: 3px solid #3b86f6; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
