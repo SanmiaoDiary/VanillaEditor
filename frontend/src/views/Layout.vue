@@ -6,12 +6,9 @@
       <Sidebar v-if="activePanel === 'files'" :files="files" @file-click="openFile" @folder-click="toggleFolder" />
       <GitPanel v-else-if="activePanel === 'git'" :docs="docs" @open-doc="openFile" />
       <div class="editor-area">
-        <EditorPane
-          :doc-id="editorStore.activeDocId"
-          :file-path="editorStore.activeFilePath"
+      <EditorPane
           :content="editorStore.content"
           @change="onEditorChange"
-          @save="saveFile"
         />
         <PreviewPane :content="editorStore.content" />
       </div>
@@ -69,6 +66,10 @@ async function setPanel(panel) {
   activePanel.value = panel
 }
 
+function toggleFolder(docId) {
+  // handled by Sidebar component internally
+}
+
 async function loadFiles() {
   try {
     const res = await api.get('/docs')
@@ -76,6 +77,7 @@ async function loadFiles() {
     if (res.data.length > 0) {
       const first = res.data[0]
       editorStore.activeDocId = first.id
+      editorStore.gitBranch = 'main'
       if (first.children?.length > 0) {
         await openFile(first.id, first.children[0].path)
       }
@@ -87,10 +89,12 @@ async function loadFiles() {
 
 async function openFile(docId, filePath) {
   editorStore.activeDocId = docId
+  editorStore.activeFilePath = filePath
   try {
     const res = await api.get(`/files/${docId}/${encodeURIComponent(filePath)}`)
-    editorStore.setActiveFile(docId, filePath, res.data.content, res.data.sha)
-    editorStore.gitBranch = 'main'
+    editorStore.content = res.data.content
+    editorStore.fileSha = res.data.sha
+    editorStore.unsaved = false
   } catch (e) {
     addToast('无法打开文件', 'error')
   }
@@ -98,7 +102,7 @@ async function openFile(docId, filePath) {
 
 function onEditorChange(newContent) {
   editorStore.content = newContent
-  editorStore.markUnsaved()
+  editorStore.unsaved = true
 }
 
 let saveTimer = null
@@ -108,7 +112,7 @@ async function saveFile() {
     await api.put(`/files/${editorStore.activeDocId}/${encodeURIComponent(editorStore.activeFilePath)}`, {
       content: editorStore.content
     })
-    editorStore.clearUnsaved()
+    editorStore.unsaved = false
     addToast('已保存', 'success')
   } catch (e) {
     addToast('保存失败', 'error')
