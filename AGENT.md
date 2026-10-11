@@ -26,20 +26,9 @@ VanillaEditor/
 │   ├── routes.py       # 所有 API 路由（单一入口，不要分散到多个文件）
 │   └── git/
 │       └── service.py  # Git 操作封装（list_files/read/write/commit/pull/push/log）
-├── frontend/           # Vue 3 + Vite 前端
-│   ├── src/
-│   │   ├── components/ # 通用组件（ActivityBar/Sidebar/GitPanel/EditorPane/PreviewPane/StatusBar/Toast）
-│   │   ├── views/      # 页面组件（Login/Layout/Settings/Sync）
-│   │   ├── stores/     # Pinia store（auth.js/editor.js）
-│   │   ├── router/     # Vue Router 配置
-│   │   ├── api/        # Axios 封装（自动携带 JWT）
-│   │   ├── App.vue
-│   │   └── main.js
-│   ├── index.html
-│   ├── vite.config.js
-│   ├── package.json
-│   └── ...
-├── static/             # 前端构建产物（npm run build 后生成，已被 .gitignore）
+├── static/             # 前端（单文件方案，无需构建）
+│   ├── index.html      # 全部前端代码：UI + 逻辑 + 路由
+│   └── vendor/         # 本地 Bootstrap 5.3.3 + bootstrap-icons 1.11.3（不依赖 CDN）
 ├── data/               # 运行时数据（用户数据、Git 仓库，已被 .gitignore）
 ├── requirements.txt    # Python 依赖
 ├── run.py              # 后端启动入口
@@ -51,13 +40,8 @@ VanillaEditor/
 | 层 | 技术 |
 |----|------|
 | 后端 | Python 3.10+、Flask 3.0 |
-| 前端 | Vue 3 + Vite 5 |
-| UI | Bootstrap 5 + Bootstrap Icons |
-| 状态管理 | Pinia |
-| 路由 | Vue Router 4 |
-| HTTP | Axios |
-| Markdown | marked |
-| Git | gitpython |
+| 前端 | 原生 JS 单文件（static/index.html），hash 路由，无构建步骤 |
+| UI | Bootstrap 5.3.3 + Bootstrap Icons 1.11.3（本地 static/vendor/，禁止依赖 CDN） |
 | 认证 | bcrypt + JWT |
 
 ---
@@ -75,11 +59,14 @@ VanillaEditor/
 
 ### 前端
 
-1. **单文件架构**：前端全部代码在 `static/index.html`，通过 CDN 加载 Vue 3、Vue Router、Pinia、axios、marked，无构建步骤
-2. **无需 npm/vite**：没有 Node.js 依赖，不需要 `npm install` 或 `npm run build`
-3. 调用 API 用全局 `api` 对象（已封装 axios + JWT 自动注入）
-4. 修改界面直接在 `static/index.html` 里改对应组件的代码
-5. **注意**：Windows 浏览器可能缓存 HTML，修改后需 Ctrl+Shift+R 刷新
+1. **单文件架构**：前端全部代码在 `static/index.html`，原生 JS（手写 hash 路由 + fetch），无构建步骤
+2. **UI 框架**：Bootstrap 5.3.3 与 bootstrap-icons 1.11.3 已下载到 `static/vendor/` 本地引用；页面统一 `data-bs-theme="dark"`
+3. **禁止 emoji**：所有图标必须用 bootstrap-icons（如 `bi-folder`、`bi-git`、`bi-gear`），不得使用 emoji 表情
+4. **路由**：hash 路由，仅三个页面：`#/login`（登录/注册）、`#/editor`（编辑器主工作区）、`#/setting`（用户信息与设置）
+5. **响应式**：侧边栏在 <992px 使用 Bootstrap `offcanvas-lg` 抽屉；编辑区 <768px 纵向堆叠；导航栏提供移动端折叠菜单
+6. 调 API 用全局 `apiFetch()` 函数（自动携带 JWT，401 自动跳登录）
+7. 修改界面直接在 `static/index.html` 里改对应渲染函数
+8. **注意**：Windows 浏览器可能缓存 HTML，修改后需 Ctrl+Shift+R 刷新
 
 ### Git 操作（后端）
 
@@ -95,12 +82,11 @@ VanillaEditor/
 ### 添加新 API 接口
 
 1. 在 `app/routes.py` 的对应区块添加路由
-2. 在 `frontend/src/api/` 添加封装函数（可选）
-3. 在前端组件中调用
+2. 在 `static/index.html` 中用 `apiFetch()` 调用
 
 ### 添加新前端页面
 
-直接在 `static/index.html` 的脚本中定义新组件并注册到 router。
+在 `static/index.html` 中编写渲染函数，并用 `Router.register('#/xxx', ...)` 注册路由（注意路由命名规范：`#/login`、`#/editor`、`#/setting`）。
 
 ### 修改样式
 
