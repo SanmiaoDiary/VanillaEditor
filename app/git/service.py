@@ -39,10 +39,11 @@ class GitService:
         repo_path = self.ensure_repo(username, doc_id)
         result = []
         for root, dirs, files in os.walk(repo_path):
+            dirs[:] = [d for d in dirs if d != ".git"]
             rel = os.path.relpath(root, repo_path)
             for f in files:
                 full_rel = os.path.join(rel, f) if rel != "." else f
-                if full_rel.startswith(".git/"):
+                if full_rel.replace(os.sep, "/").startswith(".git/"):
                     continue
                 result.append({
                     "name": f,
