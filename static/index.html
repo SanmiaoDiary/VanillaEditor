@@ -182,8 +182,8 @@ let isRegister = false;
 let loginError = '';
 let saveTimer = null;
 let timeDisplay = new Date().toLocaleTimeString();
-const render = renderEditor;
-setInterval(() => { timeDisplay = new Date().toLocaleTimeString(); render(); }, 1000);
+let currentPage = '#/login';
+setInterval(() => { timeDisplay = new Date().toLocaleTimeString(); renderPage(); }, 1000);
 
 // ── Login / Register ─────────────────────────────────────────
 function renderLogin() {
@@ -529,22 +529,37 @@ async function createDoc() {
 }
 
 // ── Route handlers ───────────────────────────────────────────
+function renderPage() {
+  const hash = location.hash || '#/login';
+  currentPage = hash;
+  const app = document.getElementById('app');
+  if (!app) return;
+  if (hash === '#/login') {
+    renderLogin();
+  } else if (hash === '#/editor') {
+    if (auth.isLoggedIn) renderEditor();
+  } else if (hash === '#/settings') {
+    if (auth.isLoggedIn) renderSettings();
+  } else if (hash === '#/sync') {
+    if (auth.isLoggedIn) renderSync();
+  }
+}
 Router.register('#/login', () => {
   if (auth.isLoggedIn) { Router.go('#/editor'); return; }
-  renderLogin();
+  renderPage();
 });
 Router.register('#/editor', async () => {
   if (!auth.isLoggedIn) { Router.go('#/login'); return; }
-  renderEditor();
+  renderPage();
   await loadFiles();
 });
 Router.register('#/settings', () => {
   if (!auth.isLoggedIn) { Router.go('#/login'); return; }
-  renderSettings();
+  renderPage();
 });
 Router.register('#/sync', () => {
   if (!auth.isLoggedIn) { Router.go('#/login'); return; }
-  renderSync();
+  renderPage();
 });
 
 // ── Init ─────────────────────────────────────────────────────
