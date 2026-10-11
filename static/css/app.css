@@ -14,7 +14,8 @@ body { overflow: hidden; }
 .ve-abar .ib.on { color: var(--bs-body-color); border-left-color: var(--ve-accent); }
 
 /* sidebar */
-.ve-sidebar { width: 280px; flex-shrink: 0; display: flex; overflow: hidden; }
+.ve-sidebar { width: 280px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; }
+.ve-sidebar .offcanvas-body { flex-grow: 1; width: 100%; min-width: 0; }
 .ve-sidebar .panel { flex: 1 1 auto; min-width: 0; width: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--bs-body-bg); }
 @media (max-width: 991.98px) {
   .ve-sidebar { width: 100% !important; }
