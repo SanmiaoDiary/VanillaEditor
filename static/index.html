@@ -226,7 +226,7 @@ async function handleAuth(e) {
     }
     const r = await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ username: u, password: p }) });
     if (r) { auth.login(r.token, r.username); Router.go('#/editor'); }
-  } catch(e) { loginError = e.message || '操作失败'; btn.disabled = false; btn.textContent = isRegister ? '注册' : '登录'; }
+  } catch(e) { loginError = e.message || '操作失败'; btn.disabled = false; btn.textContent = isRegister ? '注册' : '登录'; renderLogin(); }
 }
 
 // ── File operations ──────────────────────────────────────────
@@ -317,6 +317,7 @@ function toggleDoc(docId) {
 // ── Render editor layout ─────────────────────────────────────
 function renderEditor() {
   const app = document.getElementById('app');
+  app.innerHTML = '';
 
   // Menu bar
   const menu = document.createElement('div');
