@@ -41,7 +41,9 @@ async function apiFetch(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (auth.token) headers['Authorization'] = 'Bearer ' + auth.token;
   const res = await fetch('/api' + path, { ...opts, headers });
-  if (res.status === 401) { auth.logout(); Router.go('#/login'); return null; }
+  // 登录/注册接口的 401 表示密码错误，交给调用方展示错误；其他接口 401 视为登录过期
+  const isAuthForm = path === '/auth/login' || path === '/auth/init';
+  if (res.status === 401 && !isAuthForm) { auth.logout(); Router.go('#/login'); return null; }
   if (!res.ok) {
     let msg = '请求失败（' + res.status + '）';
     try {
