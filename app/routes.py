@@ -273,6 +273,74 @@ def create_app():
         code, out, err = git_service._git(repo_path, "remote", "remove", name)
         return jsonify({"ok": code == 0})
 
+    # ── /api/git ─────────────────────────────────────────────
+
+    @app.route("/api/git/config", methods=["GET"])
+    @require_auth
+    def git_config_get():
+        username = g.username
+        doc_id = request.args.get("doc_id", "")
+        if not doc_id:
+            return jsonify({"error": "doc_id required"}), 400
+        return jsonify(git_service.get_config(username, doc_id))
+
+    @app.route("/api/git/config", methods=["POST"])
+    @require_auth
+    def git_config_set():
+        username = g.username
+        data = request.get_json() or {}
+        doc_id = data.get("doc_id")
+        if not doc_id:
+            return jsonify({"error": "doc_id required"}), 400
+        ok = git_service.set_config(username, doc_id, data.get("name"), data.get("email"))
+        return jsonify({"ok": ok})
+
+    @app.route("/api/git/branches", methods=["GET"])
+    @require_auth
+    def git_branches():
+        username = g.username
+        doc_id = request.args.get("doc_id", "")
+        if not doc_id:
+            return jsonify({"error": "doc_id required"}), 400
+        return jsonify(git_service.branches(username, doc_id))
+
+    @app.route("/api/git/branch", methods=["POST"])
+    @require_auth
+    def git_branch_op():
+        username = g.username
+        data = request.get_json() or {}
+        doc_id = data.get("doc_id")
+        name = data.get("name", "").strip()
+        action = data.get("action", "switch")
+        if not doc_id or not name:
+            return jsonify({"error": "doc_id and name required"}), 400
+        ok, err = git_service.checkout(username, doc_id, name, create=(action == "create"))
+        return jsonify({"ok": ok, "error": err})
+
+    @app.route("/api/git/merge", methods=["POST"])
+    @require_auth
+    def git_merge():
+        username = g.username
+        data = request.get_json() or {}
+        doc_id = data.get("doc_id")
+        branch = data.get("branch", "")
+        if not doc_id or not branch:
+            return jsonify({"error": "doc_id and branch required"}), 400
+        ok, err = git_service.merge(username, doc_id, branch)
+        return jsonify({"ok": ok, "error": err})
+
+    @app.route("/api/git/reset", methods=["POST"])
+    @require_auth
+    def git_reset():
+        username = g.username
+        data = request.get_json() or {}
+        doc_id = data.get("doc_id")
+        sha = data.get("sha", "")
+        if not doc_id or not sha:
+            return jsonify({"error": "doc_id and sha required"}), 400
+        ok, err = git_service.reset_hard(username, doc_id, sha)
+        return jsonify({"ok": ok, "error": err})
+
     # ── front-end fallback ────────────────────────────────────
 
     @app.route("/")

@@ -23,6 +23,13 @@ class GitService:
             ["git", "init", "--initial-branch=main"],
             cwd=repo_path, check=True, capture_output=True
         )
+        # 默认提交身份，避免首次 commit 因缺 user.name/email 失败
+        _, name, _ = self._git(repo_path, "config", "user.name")
+        if not name.strip():
+            self._git(repo_path, "config", "user.name", username)
+        _, email, _ = self._git(repo_path, "config", "user.email")
+        if not email.strip():
+            self._git(repo_path, "config", "user.email", f"{username}@vanilla.local")
         return repo_path
 
     def repo_exists(self, username, doc_id):
@@ -156,3 +163,46 @@ class GitService:
         repo_path = self.ensure_repo(username, doc_id)
         code, out, err = self._git(repo_path, "branch", "--show-current")
         return out.strip() if code == 0 else "main"
+
+    # ── config / branches / merge / reset ───────────────────────
+
+    def get_config(self, username, doc_id):
+        repo_path = self.ensure_repo(username, doc_id)
+        _, name, _ = self._git(repo_path, "config", "user.name")
+        _, email, _ = self._git(repo_path, "config", "user.email")
+        return {"name": name.strip(), "email": email.strip()}
+
+    def set_config(self, username, doc_id, name=None, email=None):
+        repo_path = self.ensure_repo(username, doc_id)
+        ok = True
+        if name:
+            ok = ok and self._git(repo_path, "config", "user.name", name)[0] == 0
+        if email:
+            ok = ok and self._git(repo_path, "config", "user.email", email)[0] == 0
+        return ok
+
+    def branches(self, username, doc_id):
+        repo_path = self.ensure_repo(username, doc_id)
+        code, out, _ = self._git(repo_path, "branch", "--format=%(refname:short)|%(HEAD)")
+        result = []
+        for line in out.splitlines():
+            if "|" in line:
+                name, head = line.split("|", 1)
+                result.append({"name": name.strip(), "current": head.strip() == "*"})
+        return result
+
+    def checkout(self, username, doc_id, name, create=False):
+        repo_path = self.ensure_repo(username, doc_id)
+        args = ["checkout", "-b", name] if create else ["checkout", name]
+        code, _, err = self._git(repo_path, *args)
+        return code == 0, err.strip() if code != 0 else ""
+
+    def merge(self, username, doc_id, branch):
+        repo_path = self.ensure_repo(username, doc_id)
+        code, _, err = self._git(repo_path, "merge", "--no-edit", branch)
+        return code == 0, err.strip() if code != 0 else ""
+
+    def reset_hard(self, username, doc_id, sha):
+        repo_path = self.ensure_repo(username, doc_id)
+        code, _, err = self._git(repo_path, "reset", "--hard", sha)
+        return code == 0, err.strip() if code != 0 else ""

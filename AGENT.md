@@ -76,6 +76,8 @@ VanillaEditor/
 - commit message 格式：`update: <文件名>`
 - pull/push 时使用 `git pull --no-rebase` / `git push`
 - 空仓库（无提交）时 `git status` 会报错，调用前先检查 `.git` 目录是否存在
+- 分支/配置/合并/回退：`/api/git/config`、`/api/git/branches`、`/api/git/branch`、`/api/git/merge`、`/api/git/reset`（实现在 `GitService` 的 config/branches/checkout/merge/reset_hard 方法）
+- 新仓库 init 时自动写入默认 `user.name`/`user.email`（用户名 + `@vanilla.local`），避免首次提交失败
 
 ---
 

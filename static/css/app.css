@@ -8,17 +8,16 @@ body { overflow: hidden; }
 .ve-logo-text { white-space: nowrap; }
 
 /* activity bar */
-.ve-abar { width: 48px; background: var(--bs-body-color); opacity: .92; display: flex; flex-direction: column; align-items: center; padding-top: 8px; gap: 2px; flex-shrink: 0; }
-.ve-abar .ib { width: 48px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: rgba(255,255,255,.55); font-size: 18px; border-left: 2px solid transparent; }
-.ve-abar .ib:hover { color: #fff; }
-.ve-abar .ib.on { color: #fff; border-left-color: #fff; }
+.ve-abar { width: 48px; background: var(--bs-tertiary-bg); display: flex; flex-direction: column; align-items: center; padding-top: 8px; gap: 2px; flex-shrink: 0; border-right: 1px solid var(--bs-border-color); }
+.ve-abar .ib { width: 48px; height: 44px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--bs-secondary-color); font-size: 18px; border-left: 2px solid transparent; }
+.ve-abar .ib:hover { color: var(--bs-body-color); }
+.ve-abar .ib.on { color: var(--bs-body-color); border-left-color: var(--ve-accent); }
 
 /* sidebar */
 .ve-sidebar { width: 280px; flex-shrink: 0; display: flex; overflow: hidden; }
-.ve-sidebar .panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bs-body-color); opacity: .55; }
+.ve-sidebar .panel { flex: 1 1 auto; min-width: 0; width: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--bs-body-bg); }
 @media (max-width: 991.98px) {
-  .ve-sidebar { width: 100%; }
-  .ve-sidebar .panel { opacity: 1; background: var(--bs-tertiary-bg); }
+  .ve-sidebar { width: 100% !important; }
 }
 
 .ve-tree-item { display: flex; align-items: center; padding: 4px 10px; cursor: pointer; gap: 6px; font-size: 13px; color: var(--bs-body-color); }
@@ -47,3 +46,10 @@ body { overflow: hidden; }
 .hidden { display: none !important; }
 .ve-scroll { flex: 1; overflow-y: auto; }
 @media (max-width: 991.98px) { .offcanvas-lg { --bs-offcanvas-width: 320px; } }
+
+/* resizable splitters */
+.ve-resizer { flex-shrink: 0; background: var(--bs-border-color); transition: background .15s; }
+.ve-resizer-v { width: 4px; cursor: col-resize; }
+.ve-resizer-v:hover, .ve-resizer-v.active { background: var(--ve-accent); }
+.ve-resizer-h { height: 4px; cursor: row-resize; }
+.ve-resizer-h:hover, .ve-resizer-h.active { background: var(--ve-accent); }

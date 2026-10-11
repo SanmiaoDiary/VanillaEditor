@@ -73,21 +73,112 @@ function toast(msg, type = 'info') {
   t.addEventListener('hidden.bs.toast', () => el.remove());
 }
 
-// ── Markdown parser (simple inline) ──────────────────────────
+// ── Markdown parser ──────────────────────────────────────────
 function parseMd(src) {
   if (!src) return '';
-  return src
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-    .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-    .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-    .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
-    .replace(/\*(.*)\*/gim, '<em>$1</em>')
-    .replace(/`([^`]+)`/gim, '<code>$1</code>')
-    .replace(/^\> (.*$)/gim, '<blockquote>$1</blockquote>')
-    .replace(/^\- (.*$)/gim, '<li>$1</li>')
-    .replace(/^\d+\. (.*$)/gim, '<li>$1</li>')
-    .replace(/\n/gim, '<br>');
+  const inline = s => {
+    const code = [];
+    s = s.replace(/`([^`]+)`/g, (m, c) => { code.push(c); return '\u0000' + (code.length - 1) + '\u0000'; });
+    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img src="$2" alt="$1">');
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    s = s.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    s = s.replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>');
+    s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+    s = s.replace(/\u0000(\d+)\u0000/g, (m, i) => '<code>' + code[+i] + '</code>');
+    return s;
+  };
+  const renderList = (items, idx, indent) => {
+    const tag = items[idx].ordered ? 'ol' : 'ul';
+    let html = '<' + tag + '>', i = idx;
+    while (i < items.length && items[i].indent >= indent) {
+      const it = items[i];
+      if (it.indent > indent) {
+        const sub = renderList(items, i, it.indent);
+        html += sub.html; i = sub.next; continue;
+      }
+      html += '<li>' + inline(esc(it.text)) + '</li>';
+      i++;
+    }
+    return { html: html + '</' + tag + '>', next: i };
+  };
+
+  const lines = src.replace(/\r\n?/g, '\n').split('\n');
+  const listRe = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
+  const isBlockStart = l =>
+    /^\s*$/.test(l) || /^(#{1,6})\s+/.test(l) || /^```/.test(l) || /^\s*>/.test(l) ||
+    listRe.test(l) || (/^\s*\|.*\|\s*$/.test(l)) ||
+    /^\s*([-*_])\s*(\1\s*){2,}$/.test(l);
+
+  let html = '', i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // 代码块 ```lang ... ```
+    const fence = line.match(/^```(\S*)\s*$/);
+    if (fence) {
+      const buf = [];
+      i++;
+      while (i < lines.length && !/^```\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
+      i++;
+      html += '<pre><code>' + esc(buf.join('\n')) + '</code></pre>';
+      continue;
+    }
+
+    if (/^\s*$/.test(line)) { i++; continue; }
+
+    // 标题
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { html += '<h' + h[1].length + '>' + inline(esc(h[2])) + '</h' + h[1].length + '>'; i++; continue; }
+
+    // 分割线
+    if (/^\s*([-*_])\s*(\1\s*){2,}$/.test(line)) { html += '<hr>'; i++; continue; }
+
+    // 引用块
+    if (/^\s*>/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) { buf.push(lines[i].replace(/^\s*>\s?/, '')); i++; }
+      html += '<blockquote>' + parseMd(buf.join('\n')) + '</blockquote>';
+      continue;
+    }
+
+    // 表格
+    if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+      const cells = r => r.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+      const head = cells(line);
+      i += 2;
+      html += '<table><thead><tr>' + head.map(c => '<th>' + inline(esc(c)) + '</th>').join('') + '</tr></thead><tbody>';
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+        html += '<tr>' + cells(lines[i]).map(c => '<td>' + inline(esc(c)) + '</td>').join('') + '</tr>';
+        i++;
+      }
+      html += '</tbody></table>';
+      continue;
+    }
+
+    // 列表（支持 - * + 与数字序号、缩进嵌套）
+    const lm = line.match(listRe);
+    if (lm) {
+      const items = [];
+      while (i < lines.length) {
+        const m = lines[i].match(listRe);
+        if (!m) break;
+        items.push({ indent: m[1].length, ordered: /^\d/.test(m[2]), text: m[3] });
+        i++;
+      }
+      html += renderList(items, 0, items[0].indent).html;
+      continue;
+    }
+
+    // 段落
+    const buf = [line];
+    i++;
+    while (i < lines.length && !isBlockStart(lines[i])) { buf.push(lines[i]); i++; }
+    html += '<p>' + inline(esc(buf.join('\n'))).replace(/\n/g, '<br>') + '</p>';
+  }
+  return html;
 }
 
 function esc(s) {
@@ -309,6 +400,304 @@ function logout() {
   Router.go('#/login');
 }
 
+// ── Modal helper ─────────────────────────────────────────────
+function showModal(title, body, footer) {
+  closeModal();
+  const el = document.createElement('div');
+  el.className = 'modal fade';
+  el.id = 'veModal';
+  el.tabIndex = -1;
+  el.innerHTML =
+    '<div class="modal-dialog modal-dialog-scrollable"><div class="modal-content">' +
+      '<div class="modal-header py-2">' +
+        '<h5 class="modal-title fs-6">' + title + '</h5>' +
+        '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>' +
+      '</div>' +
+      '<div class="modal-body">' + body + '</div>' +
+      (footer ? '<div class="modal-footer py-2">' + footer + '</div>' : '') +
+    '</div></div>';
+  document.body.appendChild(el);
+  el.addEventListener('hidden.bs.modal', () => el.remove());
+  new bootstrap.Modal(el).show();
+}
+
+function closeModal() {
+  const el = document.getElementById('veModal');
+  if (el) { const m = bootstrap.Modal.getInstance(el); if (m) m.hide(); }
+}
+
+// ── 文件菜单：打开 / 导入 / 保存 / 另存为 ─────────────────────
+function menuOpen() {
+  if (sidebarDocs.length === 0) return showModal('打开文档', '<div class="text-secondary small">暂无文档，请先新建或导入</div>');
+  const body = sidebarDocs.map(doc =>
+    '<div class="fw-semibold small text-secondary mb-1">' + esc(doc.name) + '</div>' +
+    ((doc.children || []).map(f =>
+      '<button class="btn btn-sm btn-outline-secondary w-100 text-start mb-1" onclick="modalOpenFile(\'' + esc(doc.id) + '\',\'' + esc(f.path) + '\')">' +
+        '<i class="bi bi-file-earmark-text me-1"></i>' + esc(f.path) +
+      '</button>').join('') || '<div class="text-secondary small mb-2">（空）</div>')
+  ).join('<hr class="my-2">');
+  showModal('打开文档', body);
+}
+
+function modalOpenFile(docId, path) {
+  closeModal();
+  openFile(docId, path);
+}
+
+function menuImport() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.md,.markdown,.txt';
+  inp.multiple = true;
+  inp.onchange = async () => {
+    for (const f of inp.files) {
+      const text = await f.text();
+      await apiFetch('/docs', { method: 'POST', body: JSON.stringify({ name: f.name, content: text }) });
+    }
+    toast('导入完成', 'ok');
+    await loadFiles();
+    renderEditor();
+  };
+  inp.click();
+}
+
+async function saveNow() {
+  if (!editor.activeDocId || !editor.activeFilePath) return toast('未打开文件', 'err');
+  clearTimeout(saveTimer);
+  const r = await apiFetch('/files/' + editor.activeDocId + '/' + encodeURIComponent(editor.activeFilePath), {
+    method: 'PUT', body: JSON.stringify({ content: editor.content })
+  });
+  if (r) {
+    editor.unsaved = false;
+    document.querySelectorAll('.ve-unsaved-dot').forEach(el => el.classList.add('hidden'));
+    const ub = document.getElementById('veUnsavedBar');
+    if (ub) ub.classList.add('hidden');
+    toast('已保存', 'ok');
+  }
+}
+
+async function menuSaveAs() {
+  const name = prompt('另存为（新文档名，如 copy.md）：');
+  if (!name) return;
+  const r = await apiFetch('/docs', { method: 'POST', body: JSON.stringify({ name: name, content: editor.content }) });
+  if (r) {
+    await loadFiles();
+    await openFile(r.id, r.name);
+    toast('已另存为 ' + name, 'ok');
+  }
+}
+
+// ── Git 菜单 ─────────────────────────────────────────────────
+function needDoc() {
+  if (!editor.activeDocId) { toast('请先打开一个文档', 'err'); return false; }
+  return true;
+}
+
+async function menuGitConfig() {
+  if (!needDoc()) return;
+  const cfg = await apiFetch('/git/config?doc_id=' + encodeURIComponent(editor.activeDocId));
+  showModal('设置 Git 基础信息',
+    '<div class="mb-2"><label class="form-label small">user.name</label>' +
+    '<input class="form-control form-control-sm" id="gName" value="' + esc(cfg.name) + '"></div>' +
+    '<div class="mb-1"><label class="form-label small">user.email</label>' +
+    '<input class="form-control form-control-sm" id="gEmail" value="' + esc(cfg.email) + '"></div>' +
+    '<div class="text-secondary small">用于提交记录的作者身份，仅作用于当前文档仓库</div>',
+    '<button class="btn btn-primary btn-sm" onclick="saveGitConfig()">保存</button>');
+}
+
+async function saveGitConfig() {
+  const r = await apiFetch('/git/config', {
+    method: 'POST',
+    body: JSON.stringify({ doc_id: editor.activeDocId, name: document.getElementById('gName').value.trim(), email: document.getElementById('gEmail').value.trim() })
+  });
+  if (r && r.ok) { closeModal(); toast('Git 信息已保存', 'ok'); }
+  else toast('保存失败', 'err');
+}
+
+async function menuRemotes() {
+  if (!needDoc()) return;
+  const list = await apiFetch('/sync/remote', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId }) });
+  const body =
+    '<div class="input-group mb-3">' +
+      '<input id="mRemoteUrl" class="form-control form-control-sm" placeholder="http://192.168.1.x:5000">' +
+      '<button class="btn btn-primary btn-sm" onclick="modalAddRemote()"><i class="bi bi-plus-lg"></i></button>' +
+    '</div>' +
+    ((list || []).length ? list.map(r =>
+      '<div class="d-flex align-items-center gap-2 py-1 border-bottom border-secondary-subtle small">' +
+        '<i class="bi bi-router text-secondary"></i>' +
+        '<span class="flex-grow-1 text-truncate">' + esc(r.name) + '</span>' +
+        '<span class="text-secondary text-truncate" style="max-width:45%">' + esc(r.url) + '</span>' +
+        '<button class="btn btn-sm btn-outline-danger py-0" onclick="modalDelRemote(\'' + esc(r.name) + '\')"><i class="bi bi-x-lg"></i></button>' +
+      '</div>').join('') : '<div class="text-secondary small">暂无远端设备</div>');
+  showModal('配置远程仓库', body);
+}
+
+async function modalAddRemote() {
+  const url = document.getElementById('mRemoteUrl').value.trim();
+  if (!url) return;
+  await apiFetch('/sync/remote', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId, name: 'remote-' + Date.now().toString(36), url: url }) });
+  closeModal();
+  setTimeout(menuRemotes, 300);
+}
+
+async function modalDelRemote(name) {
+  await apiFetch('/sync/remote/' + encodeURIComponent(name), { method: 'DELETE', body: JSON.stringify({ doc_id: editor.activeDocId }) });
+  closeModal();
+  setTimeout(menuRemotes, 300);
+}
+
+async function menuNewBranch() {
+  if (!needDoc()) return;
+  showModal('添加新分支',
+    '<div class="mb-1"><label class="form-label small">分支名</label>' +
+    '<input class="form-control form-control-sm" id="nbName" placeholder="feature-xxx"></div>' +
+    '<div class="text-secondary small">将从当前分支创建并切换过去</div>',
+    '<button class="btn btn-primary btn-sm" onclick="createBranch()">创建</button>');
+}
+
+async function createBranch() {
+  const name = document.getElementById('nbName').value.trim();
+  if (!name) return;
+  if (editor.unsaved) await saveNow();
+  const r = await apiFetch('/git/branch', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId, name: name, action: 'create' }) });
+  if (r && r.ok) { closeModal(); editor.gitBranch = name; renderEditor(); toast('已创建并切换到 ' + name, 'ok'); }
+  else toast('创建失败：' + (r ? r.error : ''), 'err');
+}
+
+async function menuSwitchBranch() {
+  if (!needDoc()) return;
+  const list = await apiFetch('/git/branches?doc_id=' + encodeURIComponent(editor.activeDocId));
+  const body = list.length ? list.map(b =>
+    '<button class="btn btn-sm btn-outline-secondary w-100 text-start mb-1" onclick="switchBranch(\'' + esc(b.name) + '\')">' +
+      '<i class="bi ' + (b.current ? 'bi-check2-circle' : 'bi-circle') + ' me-1"></i>' + esc(b.name) +
+      (b.current ? '<span class="text-secondary small ms-1">（当前）</span>' : '') +
+    '</button>').join('') : '<div class="text-secondary small">暂无分支</div>';
+  showModal('切换分支', body);
+}
+
+async function switchBranch(name) {
+  if (editor.unsaved) await saveNow();
+  const r = await apiFetch('/git/branch', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId, name: name, action: 'switch' }) });
+  if (r && r.ok) {
+    closeModal();
+    editor.gitBranch = name;
+    if (editor.activeFilePath) {
+      const cur = await apiFetch('/files/' + editor.activeDocId + '/' + encodeURIComponent(editor.activeFilePath));
+      if (cur) { editor.content = cur.content; editor.fileSha = cur.sha; editor.unsaved = false; }
+    }
+    await loadGitData();
+    renderEditor();
+    toast('已切换到 ' + name, 'ok');
+  } else toast('切换失败：' + (r ? r.error : ''), 'err');
+}
+
+async function menuMergeBranch() {
+  if (!needDoc()) return;
+  const list = await apiFetch('/git/branches?doc_id=' + encodeURIComponent(editor.activeDocId));
+  const others = list.filter(b => !b.current);
+  const body = others.length ? others.map(b =>
+    '<button class="btn btn-sm btn-outline-secondary w-100 text-start mb-1" onclick="mergeBranch(\'' + esc(b.name) + '\')">' +
+      '<i class="bi bi-sign-merge-left me-1"></i>合并 ' + esc(b.name) + ' 到当前分支' +
+    '</button>').join('') : '<div class="text-secondary small">没有可合并的其他分支</div>';
+  showModal('合并分支', body);
+}
+
+async function mergeBranch(name) {
+  if (editor.unsaved) await saveNow();
+  const r = await apiFetch('/git/merge', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId, branch: name }) });
+  if (r && r.ok) {
+    closeModal();
+    await loadGitData();
+    if (editor.activeFilePath) {
+      const cur = await apiFetch('/files/' + editor.activeDocId + '/' + encodeURIComponent(editor.activeFilePath));
+      if (cur) { editor.content = cur.content; editor.unsaved = false; }
+    }
+    renderEditor();
+    toast('合并成功', 'ok');
+  } else toast('合并失败：' + (r ? r.error : ''), 'err');
+}
+
+async function menuReset() {
+  if (!needDoc()) return;
+  const list = await apiFetch('/history/' + editor.activeDocId + '?count=30');
+  const body = list.length ? list.map(c =>
+    '<div class="d-flex align-items-center gap-2 py-1 border-bottom border-secondary-subtle small">' +
+      '<i class="bi bi-circle-fill text-secondary" style="font-size:7px"></i>' +
+      '<span class="flex-grow-1 text-truncate">' + esc(c.message) + '</span>' +
+      '<span class="text-secondary">' + esc(c.sha.slice(0, 7)) + '</span>' +
+      '<button class="btn btn-sm btn-outline-warning py-0" onclick="resetTo(\'' + esc(c.sha) + '\')">回退</button>' +
+    '</div>').join('') : '<div class="text-secondary small">暂无提交记录</div>';
+  showModal('回退版本（--hard，未提交的更改会丢失）', body);
+}
+
+async function resetTo(sha) {
+  if (!confirm('确定回退到 ' + sha.slice(0, 7) + '？当前未提交的更改将丢失。')) return;
+  const r = await apiFetch('/git/reset', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId, sha: sha }) });
+  if (r && r.ok) {
+    closeModal();
+    if (editor.activeFilePath) {
+      const cur = await apiFetch('/files/' + editor.activeDocId + '/' + encodeURIComponent(editor.activeFilePath));
+      if (cur) { editor.content = cur.content; editor.unsaved = false; }
+    }
+    await loadGitData();
+    renderEditor();
+    toast('已回退到 ' + sha.slice(0, 7), 'ok');
+  } else toast('回退失败：' + (r ? r.error : ''), 'err');
+}
+
+// ── 可拖拽布局 ───────────────────────────────────────────────
+const layout = {
+  sidebarW: parseInt(localStorage.getItem('ve_sidebar_w') || '280', 10),
+  editorPct: parseInt(localStorage.getItem('ve_editor_pct') || '50', 10)
+};
+
+function applyLayout() {
+  const sb = document.getElementById('veSidebar');
+  if (sb) sb.style.width = layout.sidebarW + 'px';
+  const ed = document.getElementById('veEditorPane');
+  if (ed) ed.style.flex = '0 0 ' + layout.editorPct + '%';
+}
+
+function initResizers() {
+  const s1 = document.getElementById('veSidebarResizer');
+  if (s1) s1.onpointerdown = e => startResize(e, 'sidebar');
+  const s2 = document.getElementById('veSplitResizer');
+  if (s2) s2.onpointerdown = e => startResize(e, 'split');
+}
+
+function startResize(e, kind) {
+  e.preventDefault();
+  const handle = e.currentTarget;
+  handle.classList.add('active');
+  handle.setPointerCapture && handle.setPointerCapture(e.pointerId);
+  const startX = e.clientX;
+  const startW = layout.sidebarW, startPct = layout.editorPct;
+  const onMove = ev => {
+    if (kind === 'sidebar') {
+      layout.sidebarW = Math.min(600, Math.max(160, startW + ev.clientX - startX));
+      const sb = document.getElementById('veSidebar');
+      if (sb) sb.style.width = layout.sidebarW + 'px';
+    } else {
+      const split = document.querySelector('.ve-split');
+      if (split) {
+        const rect = split.getBoundingClientRect();
+        layout.editorPct = Math.min(85, Math.max(15, ((ev.clientX - rect.left) / rect.width) * 100));
+        const ed = document.getElementById('veEditorPane');
+        if (ed) ed.style.flex = '0 0 ' + layout.editorPct + '%';
+      }
+    }
+  };
+  const onUp = () => {
+    handle.classList.remove('active');
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    localStorage.setItem('ve_sidebar_w', String(Math.round(layout.sidebarW)));
+    localStorage.setItem('ve_editor_pct', String(Math.round(layout.editorPct)));
+  };
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+}
+
 function onFontSizeChange(val) {
   fontSize = parseInt(val, 10);
   localStorage.setItem('ve_font_size', String(fontSize));
@@ -385,12 +774,26 @@ function renderEditor() {
         '<div class="collapse navbar-collapse" id="veNav">' +
           '<ul class="navbar-nav me-auto">' +
             '<li class="nav-item dropdown">' +
-              '<a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" role="button" aria-expanded="false"><i class="bi bi-layout-sidebar me-1"></i>面板</a>' +
+              '<a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" role="button" aria-expanded="false"><i class="bi bi-folder2 me-1"></i>文件</a>' +
               '<ul class="dropdown-menu">' +
-                '<li><a class="dropdown-item" href="#" onclick="setPanel(\'files\');return false">' +
-                  '<i class="bi bi-files me-2"></i>资源管理器' + (activePanel === 'files' ? '<i class="bi bi-check2 float-end"></i>' : '') + '</a></li>' +
-                '<li><a class="dropdown-item" href="#" onclick="setPanel(\'git\');return false">' +
-                  '<i class="bi bi-git me-2"></i>Git 版本管理' + (activePanel === 'git' ? '<i class="bi bi-check2 float-end"></i>' : '') + '</a></li>' +
+                '<li><a class="dropdown-item" href="#" onclick="menuOpen();return false"><i class="bi bi-folder2-open me-2"></i>打开</a></li>' +
+                '<li><a class="dropdown-item" href="#" onclick="menuImport();return false"><i class="bi bi-box-arrow-in-down me-2"></i>导入</a></li>' +
+                '<li><hr class="dropdown-divider"></li>' +
+                '<li><a class="dropdown-item" href="#" onclick="saveNow();return false"><i class="bi bi-save me-2"></i>保存</a></li>' +
+                '<li><a class="dropdown-item" href="#" onclick="menuSaveAs();return false"><i class="bi bi-save2 me-2"></i>另存为</a></li>' +
+              '</ul>' +
+            '</li>' +
+            '<li class="nav-item dropdown">' +
+              '<a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" role="button" aria-expanded="false"><i class="bi bi-git me-1"></i>Git</a>' +
+              '<ul class="dropdown-menu">' +
+                '<li><a class="dropdown-item" href="#" onclick="menuGitConfig();return false"><i class="bi bi-person-vcard me-2"></i>设置 Git 基础信息</a></li>' +
+                '<li><a class="dropdown-item" href="#" onclick="menuRemotes();return false"><i class="bi bi-hdd-network me-2"></i>配置远程仓库</a></li>' +
+                '<li><hr class="dropdown-divider"></li>' +
+                '<li><a class="dropdown-item" href="#" onclick="menuNewBranch();return false"><i class="bi bi-plus-square me-2"></i>添加新分支</a></li>' +
+                '<li><a class="dropdown-item" href="#" onclick="menuSwitchBranch();return false"><i class="bi bi-arrow-left-right me-2"></i>切换分支</a></li>' +
+                '<li><a class="dropdown-item" href="#" onclick="menuMergeBranch();return false"><i class="bi bi-sign-merge-left me-2"></i>合并分支</a></li>' +
+                '<li><hr class="dropdown-divider"></li>' +
+                '<li><a class="dropdown-item" href="#" onclick="menuReset();return false"><i class="bi bi-arrow-counterclockwise me-2"></i>回退版本</a></li>' +
               '</ul>' +
             '</li>' +
             '<li class="nav-item"><a class="nav-link" href="#/setting"><i class="bi bi-gear me-1"></i>设置</a></li>' +
@@ -424,6 +827,7 @@ function renderEditor() {
           '<div class="panel">' + (activePanel === 'git' ? gitPanel : filesPanel) + '</div>' +
         '</div>' +
       '</aside>' +
+      '<div class="ve-resizer ve-resizer-v d-none d-lg-block" id="veSidebarResizer" title="拖动调整侧边栏宽度"></div>' +
 
       // main area
       '<main class="flex-grow-1 d-flex flex-column overflow-hidden">' +
@@ -438,9 +842,10 @@ function renderEditor() {
         '</div>' +
 
         '<div class="ve-split">' +
-          '<div class="pane d-flex flex-column">' +
+          '<div class="pane d-flex flex-column" id="veEditorPane">' +
             '<textarea class="ve-editor" id="veEditor" spellcheck="false" placeholder="在此输入 Markdown...">' + esc(editor.content) + '</textarea>' +
           '</div>' +
+          '<div class="ve-resizer ve-resizer-v d-none d-md-block" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' +
           '<div class="pane ve-preview" id="vePreview">' + parseMd(editor.content || '') + '</div>' +
         '</div>' +
       '</main>' +
@@ -467,6 +872,8 @@ function renderEditor() {
       onEditorChange(ta.value);
     });
   }
+  applyLayout();
+  initResizers();
   if (activePanel === 'git') loadGitData();
 }
 
