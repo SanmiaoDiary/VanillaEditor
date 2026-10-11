@@ -10,7 +10,7 @@ git commit -m "描述你做了什么"
 ```
 
 - 提交前确保代码可以正常运行（至少不报语法错误）
-- commit message 用中文，简短描述变更内容
+- commit message 必须使用中文，简短描述变更内容
 - 格式：`fix:` / `feat:` / `docs:` / `chore:` 开头（参考 Conventional Commits）
 - 不在 commit 中提交 `static/`、`node_modules/`、`data/`、`__pycache__/`
 
