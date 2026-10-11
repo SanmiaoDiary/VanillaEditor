@@ -290,12 +290,12 @@ async function removeRemote(name) {
 
 // ── Menu actions ─────────────────────────────────────────────
 function setPanel(panel) {
-  activePanel = activePanel === panel ? 'files' : panel;
+  activePanel = panel;
   renderEditor();
-  const el = document.getElementById('veSidebar');
-  if (el && window.innerWidth < 992) {
-    const oc = bootstrap.Offcanvas.getInstance(el) || new bootstrap.Offcanvas(el);
-    oc.show();
+  // <992px 时侧边栏为抽屉，切换面板时自动展开
+  if (window.innerWidth < 992) {
+    const el = document.getElementById('veSidebar');
+    if (el) (bootstrap.Offcanvas.getInstance(el) || new bootstrap.Offcanvas(el)).show();
   }
 }
 
@@ -375,7 +375,7 @@ function renderEditor() {
     // top navbar
     '<nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom border-secondary-subtle px-2 py-1 flex-shrink-0">' +
       '<div class="container-fluid">' +
-        '<a class="navbar-brand ve-brand mb-0" href="#/editor"><i class="bi bi-journal-richtext me-1"></i>VE</a>' +
+        '<a class="navbar-brand ve-brand mb-0" href="#/editor"><i class="bi bi-journal-richtext me-1"></i><span class="ve-logo-text">VanillaEditor</span></a>' +
         '<button class="navbar-toggler border-0 shadow-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#veSidebar" aria-controls="veSidebar" aria-label="打开侧边栏">' +
           '<i class="bi bi-layout-sidebar"></i>' +
         '</button>' +
@@ -384,8 +384,15 @@ function renderEditor() {
         '</button>' +
         '<div class="collapse navbar-collapse" id="veNav">' +
           '<ul class="navbar-nav me-auto">' +
-            '<li class="nav-item"><a class="nav-link' + (activePanel === 'files' ? ' active' : '') + '" href="#" onclick="setPanel(\'files\');return false"><i class="bi bi-folder2 me-1"></i>文件</a></li>' +
-            '<li class="nav-item"><a class="nav-link' + (activePanel === 'git' ? ' active' : '') + '" href="#" onclick="setPanel(\'git\');return false"><i class="bi bi-git me-1"></i>Git</a></li>' +
+            '<li class="nav-item dropdown">' +
+              '<a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" role="button" aria-expanded="false"><i class="bi bi-layout-sidebar me-1"></i>面板</a>' +
+              '<ul class="dropdown-menu">' +
+                '<li><a class="dropdown-item" href="#" onclick="setPanel(\'files\');return false">' +
+                  '<i class="bi bi-files me-2"></i>资源管理器' + (activePanel === 'files' ? '<i class="bi bi-check2 float-end"></i>' : '') + '</a></li>' +
+                '<li><a class="dropdown-item" href="#" onclick="setPanel(\'git\');return false">' +
+                  '<i class="bi bi-git me-2"></i>Git 版本管理' + (activePanel === 'git' ? '<i class="bi bi-check2 float-end"></i>' : '') + '</a></li>' +
+              '</ul>' +
+            '</li>' +
             '<li class="nav-item"><a class="nav-link" href="#/setting"><i class="bi bi-gear me-1"></i>设置</a></li>' +
           '</ul>' +
           '<div class="dropdown">' +
@@ -449,7 +456,17 @@ function renderEditor() {
     '</div>';
 
   const ta = document.getElementById('veEditor');
-  if (ta) ta.addEventListener('input', e => onEditorChange(e.target.value));
+  if (ta) {
+    ta.addEventListener('input', e => onEditorChange(e.target.value));
+    ta.addEventListener('keydown', e => {
+      if (e.key !== 'Tab') return;
+      e.preventDefault();
+      const s = ta.selectionStart, en = ta.selectionEnd;
+      ta.value = ta.value.slice(0, s) + '  ' + ta.value.slice(en);
+      ta.selectionStart = ta.selectionEnd = s + 2;
+      onEditorChange(ta.value);
+    });
+  }
   if (activePanel === 'git') loadGitData();
 }
 
@@ -469,7 +486,7 @@ async function renderSetting() {
   app.innerHTML =
     '<nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom border-secondary-subtle px-2 py-1 flex-shrink-0">' +
       '<div class="container-fluid">' +
-        '<a class="navbar-brand ve-brand mb-0" href="#/editor"><i class="bi bi-journal-richtext me-1"></i>VE</a>' +
+        '<a class="navbar-brand ve-brand mb-0" href="#/editor"><i class="bi bi-journal-richtext me-1"></i><span class="ve-logo-text">VanillaEditor</span></a>' +
         '<ul class="navbar-nav me-auto">' +
           '<li class="nav-item"><a class="nav-link" href="#/editor"><i class="bi bi-pencil-square me-1"></i>编辑器</a></li>' +
           '<li class="nav-item"><a class="nav-link active" href="#/setting"><i class="bi bi-gear me-1"></i>设置</a></li>' +

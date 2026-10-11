@@ -5,6 +5,7 @@ body { overflow: hidden; }
 
 .ve-brand { color: var(--ve-accent); font-weight: 600; text-decoration: none; }
 .ve-brand:hover { color: var(--ve-accent); opacity: .85; }
+.ve-logo-text { white-space: nowrap; }
 
 /* activity bar */
 .ve-abar { width: 48px; background: var(--bs-body-color); opacity: .92; display: flex; flex-direction: column; align-items: center; padding-top: 8px; gap: 2px; flex-shrink: 0; }
