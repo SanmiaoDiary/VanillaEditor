@@ -28,8 +28,11 @@ def create_app():
         if not os.path.exists(p):
             return {}
         import json
-        with open(p, encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(p, encoding="utf-8-sig") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return {}
 
     def _save_users(users):
         import json

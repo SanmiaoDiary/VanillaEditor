@@ -42,7 +42,16 @@ async function apiFetch(path, opts = {}) {
   if (auth.token) headers['Authorization'] = 'Bearer ' + auth.token;
   const res = await fetch('/api' + path, { ...opts, headers });
   if (res.status === 401) { auth.logout(); Router.go('#/login'); return null; }
-  if (!res.ok) { const text = await res.text(); throw new Error(text || res.statusText); }
+  if (!res.ok) {
+    let msg = '请求失败（' + res.status + '）';
+    try {
+      const data = await res.json();
+      if (data && data.error) msg = String(data.error);
+    } catch (e) {
+      if (res.status >= 500) msg = '服务器内部错误（' + res.status + '），请查看后端日志';
+    }
+    throw new Error(msg);
+  }
   return res.json();
 }
 
