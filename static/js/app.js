@@ -305,15 +305,32 @@ function onEditorChange(val) {
   }, 1500);
 }
 
-async function createDoc() {
-  const name = prompt('新建文档名称（如：notes.md）：');
+async function createFolder() {
+  const name = prompt('新建文件夹名称：');
   if (!name) return;
-  const r = await apiFetch('/docs', { method: 'POST', body: JSON.stringify({ name: name, content: '' }) });
+  const r = await apiFetch('/docs', { method: 'POST', body: JSON.stringify({ name: name, folder: true }) });
   if (r) {
-    editor.activeDocId = r.id;
+    expandedDocs[r.id] = true;
     await loadFiles();
     renderEditor();
+    toast('文件夹已创建', 'ok');
   }
+}
+
+async function createFile() {
+  const name = prompt('新建文件名称（如 note.md）：');
+  if (!name) return;
+  if (editor.activeDocId) {
+    await apiFetch('/files/' + editor.activeDocId + '/' + encodeURIComponent(name), {
+      method: 'PUT', body: JSON.stringify({ content: '' })
+    });
+    await loadFiles();
+    await openFile(editor.activeDocId, name);
+  } else {
+    const r = await apiFetch('/docs', { method: 'POST', body: JSON.stringify({ name: name, content: '' }) });
+    if (r) { await loadFiles(); await openFile(r.id, r.name); }
+  }
+  renderEditor();
 }
 
 async function deleteDoc(docId) {
@@ -713,7 +730,8 @@ function renderEditor() {
     '<div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom border-secondary-subtle">' +
       '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">资源管理器</span>' +
       '<span>' +
-        '<button class="btn btn-sm btn-outline-secondary me-1" title="新建文档" onclick="createDoc()"><i class="bi bi-plus-lg"></i></button>' +
+        '<button class="btn btn-sm btn-outline-secondary me-1" title="新建文件" onclick="createFile()"><i class="bi bi-file-earmark-plus"></i></button>' +
+        '<button class="btn btn-sm btn-outline-secondary me-1" title="新建文件夹" onclick="createFolder()"><i class="bi bi-folder-plus"></i></button>' +
         (editor.activeDocId ? '<button class="btn btn-sm btn-outline-danger" title="删除当前文档" onclick="deleteDoc(editor.activeDocId)"><i class="bi bi-trash3"></i></button>' : '') +
       '</span>' +
     '</div>' +

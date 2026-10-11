@@ -127,10 +127,12 @@ def create_app():
         name = data.get("name", "untitled.md")
         content = data.get("content", "")
         doc_id = data.get("id") or name.replace(" ", "-").lower()
+        is_folder = bool(data.get("folder"))
         repo_path = git_service.ensure_repo(username, doc_id)
-        git_service.write_file(username, doc_id, name, content)
-        git_service.add_all(username, doc_id)
-        git_service.commit(username, doc_id, f"init: {name}")
+        if not is_folder:
+            git_service.write_file(username, doc_id, name, content)
+            git_service.add_all(username, doc_id)
+            git_service.commit(username, doc_id, f"init: {name}")
         return jsonify({"id": doc_id, "name": name, "path": name}), 201
 
     @app.route("/api/docs/<doc_id>", methods=["DELETE"])
