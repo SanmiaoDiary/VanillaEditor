@@ -257,16 +257,49 @@ async function handleAuth(e) {
 }
 
 // ── File operations ──────────────────────────────────────────
+let lastDocsJson = '';
+
 async function loadFiles() {
   const data = await apiFetch('/docs');
   if (!data) return;
   sidebarDocs = data;
+  lastDocsJson = JSON.stringify(data);
   if (data.length > 0 && !editor.activeDocId) {
     const first = data[0];
     editor.activeDocId = first.id;
     if (first.children && first.children.length > 0) await openFile(first.id, first.children[0].path);
   }
 }
+
+// 从服务器拉取最新文档列表，有变化时自动刷新侧边栏（其他设备删除/新增也会同步显示）
+async function refreshSidebar() {
+  if (!auth.isLoggedIn || location.hash !== '#/editor') return;
+  let data;
+  try { data = await apiFetch('/docs'); } catch (e) { return; }
+  if (!data) return;
+  const j = JSON.stringify(data);
+  if (j === lastDocsJson) return;
+  sidebarDocs = data;
+  lastDocsJson = j;
+  // 当前正在输入或有弹窗打开时不重绘，避免打断操作
+  const ae = document.activeElement;
+  const typing = ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT');
+  const modalOpen = !!document.querySelector('.modal.show');
+  const ocOpen = !!document.querySelector('.offcanvas.show');
+  if (typing || modalOpen || ocOpen) return;
+  // 当前打开的文档/文件若已在服务端被删除，清空编辑区
+  if (editor.activeDocId) {
+    const doc = data.find(d => d.id === editor.activeDocId);
+    if (!doc) {
+      editor.activeDocId = ''; editor.activeFilePath = ''; editor.content = ''; editor.unsaved = false;
+    } else if (editor.activeFilePath && !(doc.children || []).some(f => f.path === editor.activeFilePath)) {
+      editor.activeFilePath = ''; editor.content = ''; editor.unsaved = false;
+    }
+  }
+  renderEditor();
+}
+setInterval(refreshSidebar, 4000);
+window.addEventListener('focus', refreshSidebar);
 
 async function openFile(docId, filePath) {
   editor.activeDocId = docId;
@@ -335,12 +368,20 @@ async function createFile() {
 
 async function deleteDoc(docId) {
   if (!confirm('确定删除文档「' + docId + '」？其 Git 历史将一并删除。')) return;
-  await apiFetch('/docs/' + encodeURIComponent(docId), { method: 'DELETE' });
+  try {
+    const r = await apiFetch('/docs/' + encodeURIComponent(docId), { method: 'DELETE' });
+    if (!r) return;
+  } catch (e) {
+    toast('删除失败：' + e.message, 'err');
+    return;
+  }
+  delete expandedDocs[docId];
   if (editor.activeDocId === docId) {
-    editor.activeDocId = ''; editor.activeFilePath = ''; editor.content = '';
+    editor.activeDocId = ''; editor.activeFilePath = ''; editor.content = ''; editor.unsaved = false;
   }
   await loadFiles();
   renderEditor();
+  toast('已删除', 'ok');
 }
 
 // ── Git operations ───────────────────────────────────────────
