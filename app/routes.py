@@ -1,4 +1,7 @@
 import os
+import shutil
+import stat
+import time
 from flask import Flask, request, jsonify, g
 from functools import wraps
 import jwt
@@ -6,6 +9,29 @@ from datetime import datetime, timezone, timedelta
 import bcrypt
 
 from app.git.service import GitService
+
+
+def _force_rmtree(path, retries=3):
+    """Windows 下 .git 对象文件可能带只读属性，先清除只读再删除，失败重试。"""
+    import sys as _sys
+    def _clear(func, p, exc):
+        try:
+            # 给文件加上写权限（保留原有权限）
+            os.chmod(p, os.stat(p).st_mode | stat.S_IWRITE)
+        except OSError:
+            pass
+        func(p)
+
+    remove = lambda p: shutil.rmtree(p, onexc=_clear) if _sys.version_info >= (3, 12) else shutil.rmtree(p, onerror=_clear)
+
+    for i in range(retries):
+        try:
+            remove(path)
+            return True
+        except OSError:
+            if i == retries - 1:
+                raise
+            time.sleep(0.3)
 
 
 def create_app():
@@ -139,10 +165,15 @@ def create_app():
     @require_auth
     def docs_delete(doc_id):
         username = g.username
-        import shutil
-        doc_path = os.path.join(app.config["DATA_DIR"], username, doc_id)
+        doc_path = os.path.normpath(os.path.join(app.config["DATA_DIR"], username, doc_id))
+        base = os.path.normpath(os.path.join(app.config["DATA_DIR"], username))
+        if not doc_path.startswith(base + os.sep):
+            return jsonify({"error": "非法路径"}), 400
         if os.path.isdir(doc_path):
-            shutil.rmtree(doc_path)
+            try:
+                _force_rmtree(doc_path)
+            except OSError as e:
+                return jsonify({"error": f"删除失败：{e}"}), 500
         return jsonify({"ok": True})
 
     # ── /api/files ────────────────────────────────────────────
