@@ -58,6 +58,7 @@ VanillaEditor/
 4. 文件路径处理必须用 `git_service._md_path()` 或 `os.path.normpath()` 防止路径穿越
 5. 数据目录默认在 `data/`（相对于项目根），启动时会自动创建
 6. 错误响应统一返回 JSON：`{"error": "描述"}`，正常响应返回 `{ok: True}` 或数据
+7. **Windows 注意**：系统 `python` 命令可能指向 Windows Store 占位符（不真正执行 Python），请使用 `.venv\Scripts\python.exe` 或 `start.bat` 启动
 
 ### 前端
 
@@ -99,7 +100,13 @@ VanillaEditor/
 ## 启动命令
 
 ```bash
-python run.py
+# Windows（推荐，避免系统 python 指向 Windows Store 占位符）
+start.bat
+# 或直接使用虚拟环境 Python
+.venv\Scripts\python.exe run.py
+
+# macOS / Linux
+.venv/bin/python run.py
 ```
 
 访问：`http://localhost:5000`（生产模式）或局域网内其他设备访问 `http://<本机IP>:5000`
