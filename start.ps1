@@ -1,8 +1,11 @@
 ﻿# VanillaEditor 启动脚本
-$pythonPath = "$PSScriptRoot\.venv\Scripts\python.exe"
-if (-not (Test-Path $pythonPath)) {
-    Write-Error "未找到虚拟环境: $pythonPath"
-    exit 1
+$projectRoot = $PSScriptRoot
+$venvPython = Join-Path $projectRoot ".venv\Scripts\python.exe"
+
+if (Test-Path $venvPython) {
+    Write-Host "启动 VanillaEditor (使用 .venv)" -ForegroundColor Cyan
+    & $venvPython "$projectRoot\run.py"
+} else {
+    Write-Host "未找到 .venv，尝试使用系统 python..." -ForegroundColor Yellow
+    python "$projectRoot\run.py"
 }
-Write-Host "启动 VanillaEditor (Python $(& $pythonPath --version 2>&1))" -ForegroundColor Cyan
-& $pythonPath "$PSScriptRoot\run.py"
