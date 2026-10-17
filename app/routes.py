@@ -498,6 +498,29 @@ def create_app():
                 result.append({"path": full_rel.replace(os.sep, "/"), "name": fn, "size": os.path.getsize(os.path.join(root, fn))})
         return jsonify({"path": path, "files": result})
 
+    @app.route("/api/fs/children", methods=["POST"])
+    @require_auth
+    def fs_children():
+        data = request.get_json() or {}
+        path = os.path.normpath(data.get("path", ""))
+        if not path or not os.path.isdir(path):
+            return jsonify({"error": "目录不存在"}), 400
+        skip_dirs = {".git", ".svn", ".hg", "__pycache__", "node_modules", ".venv", "venv", ".idea", ".vscode"}
+        real = os.path.realpath(path)
+        result = {"path": path, "dirs": [], "files": []}
+        try:
+            entries = sorted(os.listdir(path), key=lambda x: x.lower())
+            for entry in entries:
+                full = os.path.join(path, entry)
+                if os.path.isdir(full):
+                    if entry not in skip_dirs and not entry.startswith('.'):
+                        result["dirs"].append({"name": entry, "path": full.replace(os.sep, "/")})
+                elif os.path.isfile(full):
+                    result["files"].append({"name": entry, "path": full.replace(os.sep, "/"), "size": os.path.getsize(full)})
+        except PermissionError:
+            return jsonify({"error": "无权限访问该目录"}), 403
+        return jsonify(result)
+
     # ── front-end fallback ────────────────────────────────────
 
     @app.route("/")

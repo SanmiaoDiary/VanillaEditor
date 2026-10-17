@@ -78,6 +78,16 @@ body { overflow: hidden; }
 
 /* mobile offcanvas nav */
 .offcanvas.offcanvas-start { width: 280px; }
+.offcanvas.offcanvas-end { width: 280px; }
 .offcanvas.offcanvas-start .offcanvas-body .dropdown-item { border-radius: 6px; margin: 2px 8px; }
 .offcanvas.offcanvas-start .offcanvas-body .dropdown-item:hover { background: var(--bs-tertiary-bg); }
 .offcanvas.offcanvas-start .offcanvas-body .dropdown-divider { margin: 0 12px; }
+
+/* settings page */
+.ve-setting-menu-item { border-left: 3px solid transparent; transition: background .15s, color .15s; }
+.ve-setting-menu-item:hover { background: var(--bs-tertiary-bg); color: var(--bs-body-color) !important; }
+.ve-setting-menu-item.active { border-left-color: var(--bs-primary); }
+
+/* workspace directory browser */
+.ve-ws-item { cursor: pointer; transition: background .1s; }
+.ve-ws-item:hover { background: var(--bs-tertiary-bg); }

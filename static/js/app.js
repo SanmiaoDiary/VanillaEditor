@@ -395,57 +395,168 @@ async function scanDirectory(path) {
 
 let wsBrowsePath = '';
 let wsFileCache = {}; // docId -> files[]
+let wsHistory = [];   // path history stack
+let wsHistoryIdx = -1;
+let wsDefaultRoot = ''; // 默认工作区根目录
 
 async function openWorkspaceModal() {
-  const savedPath = localStorage.getItem('ve_last_workspace_path') || '';
-  let browseHtml = '<div class="text-secondary small mb-2">输入本地文件夹路径，将作为 Git 工作区打开：</div>' +
-    '<div class="input-group mb-3">' +
-      '<input class="form-control form-control-sm" id="wsPathInput" value="' + esc(savedPath) + '" placeholder="例如：D:/Projects/my-docs">' +
-    '</div>';
-  // 显示目录内文件预览
-  browseHtml += '<div id="wsScanResult" class="small text-secondary">输入路径后点击预览</div>';
-
-  showModal('打开工作区',
-    browseHtml,
-    '<button class="btn btn-sm btn-outline-secondary me-2" onclick="browseWsFolder()">浏览文件夹</button>' +
+  const data = await apiFetch('/workspaces');
+  if (data) workspaces = data;
+  if (!wsDefaultRoot) wsDefaultRoot = '/';
+  wsBrowsePath = wsDefaultRoot;
+  wsHistory = [wsDefaultRoot];
+  wsHistoryIdx = 0;
+  const dialogHtml =
+    '<div class="mb-3">' +
+      '<label class="form-label small text-secondary">服务器路径</label>' +
+      '<input class="form-control form-control-sm" id="wsPathInput" value="' + esc(wsBrowsePath) + '">' +
+    '</div>' +
+    '<div class="d-flex gap-1 mb-3 flex-wrap">' +
+      '<button class="btn btn-sm btn-outline-secondary" onclick="wsGoDefault()" title="回到默认工作区"><i class="bi bi-house"></i> 默认</button>' +
+      '<button class="btn btn-sm btn-outline-secondary" onclick="wsGoParent()" id="wsBtnParent" title="返回上级"><i class="bi bi-arrow-up"></i> 上级</button>' +
+      '<button class="btn btn-sm btn-outline-secondary" onclick="wsGoNext()" id="wsBtnNext" title="下一级"><i class="bi bi-arrow-right"></i> 下级</button>' +
+      '<button class="btn btn-sm btn-outline-secondary" onclick="wsGoBack()" id="wsBtnBack" title="上一步"><i class="bi bi-arrow-left"></i> 历史</button>' +
+    '</div>' +
+    '<div class="border border-secondary-subtle rounded overflow-auto" style="max-height:320px" id="wsDirList"></div>';
+  showModal('选择工作区', dialogHtml,
+    '<button class="btn btn-sm btn-outline-secondary" onclick="closeModal()">取消</button>' +
     '<button class="btn btn-sm btn-primary" onclick="confirmOpenWorkspace()">打开</button>');
-
-  // 路径输入框实时预览（防抖）
-  const inp = document.getElementById('wsPathInput');
-  if (inp) {
-    let timer = null;
-    inp.addEventListener('input', () => {
-      clearTimeout(timer);
-      timer = setTimeout(async () => {
-        const p = inp.value.trim();
-        localStorage.setItem('ve_last_workspace_path', p);
-        wsBrowsePath = p;
-        const el = document.getElementById('wsScanResult');
-        if (!p) { if (el) el.textContent = '输入路径后点击预览'; return; }
-        if (el) el.textContent = '扫描中…';
-        const files = await scanDirectory(p);
-        if (el) {
-          if (files.length === 0) el.textContent = '该目录为空或无法访问';
-          else el.innerHTML = '<div class="text-success mb-1"><i class="bi bi-check-circle me-1"></i>找到 ' + files.length + ' 个文件</div>' +
-            files.slice(0, 20).map(f => '<div class="text-secondary small ps-2">' + esc(f.path) + '</div>').join('') +
-            (files.length > 20 ? '<div class="text-secondary small">… 还有 ' + (files.length - 20) + ' 个文件</div>' : '');
-        }
-      }, 400);
-    });
-  }
+  renderWorkspaceDialog();
 }
 
-async function browseWsFolder() {
-  // 用路径输入框手动输入，这里提示用户输入
-  const inp = document.getElementById('wsPathInput');
-  if (inp) inp.focus();
+async function renderWorkspaceDialog() {
+  const modalBody = document.getElementById('wsDialogBody');
+  const pathDisplay = document.getElementById('wsPathDisplay');
+  if (!modalBody) return;
+  if (pathDisplay) pathDisplay.value = wsBrowsePath;
+
+  // 加载当前目录内容
+  const r = await apiFetch('/fs/children', { method: 'POST', body: JSON.stringify({ path: wsBrowsePath }) });
+  const container = document.getElementById('wsDirList');
+  if (!container) return;
+  if (!r || !r.dirs && !r.files) {
+    container.innerHTML = '<div class="text-secondary small p-3">无法读取目录内容</div>';
+    return;
+  }
+  let html = '';
+  // 上级目录（非根目录时显示）
+  if (wsBrowsePath !== wsDefaultRoot && wsBrowsePath !== '/') {
+    html += '<div class="ve-ws-item py-2 px-3 border-bottom border-secondary-subtle cursor-pointer text-secondary" onclick="wsGoParent()">' +
+      '<i class="bi bi-arrow-return-left me-2"></i>.. 返回上级</div>';
+  }
+  // 默认工作区根
+  html += '<div class="ve-ws-item py-2 px-3 border-bottom border-secondary-subtle cursor-pointer text-primary" onclick="wsGoDefault()">' +
+    '<i class="bi bi-house me-2"></i>默认工作区</div>';
+  // 子目录
+  (r.dirs || []).forEach(d => {
+    html += '<div class="ve-ws-item py-2 px-3 border-bottom border-secondary-subtle cursor-pointer" onclick="wsOpenDir(\'' + esc(d.path) + '\')">' +
+      '<i class="bi bi-folder2 me-2 text-warning"></i>' + esc(d.name) + '</div>';
+  });
+  // 文件（只读，不可选为工作区）
+  (r.files || []).slice(0, 50).forEach(f => {
+    html += '<div class="ve-ws-item py-1 px-3 border-bottom border-secondary-subtle text-secondary small">' +
+      '<i class="bi bi-file-earmark me-2"></i>' + esc(f.name) +
+      '<span class="ms-2">' + formatSize(f.size) + '</span></div>';
+  });
+  if ((r.files || []).length > 50) {
+    html += '<div class="px-3 py-2 text-secondary small">… 还有 ' + ((r.files.length || 0) - 50) + ' 个文件</div>';
+  }
+  container.innerHTML = html || '<div class="text-secondary small p-3">该目录为空</div>';
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+function wsGoDefault() { wsNavigateTo(wsDefaultRoot); }
+function wsGoParent() {
+  if (wsBrowsePath === wsDefaultRoot || wsBrowsePath === '/') return;
+  const parts = wsBrowsePath.replace(/\\/g, '/').split('/').filter(Boolean);
+  parts.pop();
+  wsNavigateTo(parts.length ? parts.join('/') : wsDefaultRoot);
+}
+function wsGoNext() {
+  if (wsHistoryIdx < wsHistory.length - 1) {
+    wsHistoryIdx++;
+    wsBrowsePath = wsHistory[wsHistoryIdx];
+    renderWorkspaceDialog();
+  }
+}
+function wsGoBack() {
+  if (wsHistoryIdx > 0) {
+    wsHistoryIdx--;
+    wsBrowsePath = wsHistory[wsHistoryIdx];
+    renderWorkspaceDialog();
+  }
+}
+function wsOpenDir(path) {
+  wsNavigateTo(path);
+}
+function wsNavigateTo(path) {
+  path = path.replace(/\\/g, '/');
+  if (wsBrowsePath !== path) {
+    // 剪掉当前路径之后的历史
+    wsHistory = wsHistory.slice(0, wsHistoryIdx + 1);
+    wsHistory.push(path);
+    wsHistoryIdx = wsHistory.length - 1;
+  }
+  wsBrowsePath = path;
+  renderWorkspaceDialog();
 }
 
 async function confirmOpenWorkspace() {
-  const inp = document.getElementById('wsPathInput');
-  const path = inp ? inp.value.trim() : '';
+  const pathInput = document.getElementById('wsPathInput');
+  const path = pathInput ? pathInput.value.trim() : wsBrowsePath;
   closeModal();
   await openWorkspace(path);
+}
+
+async function renderWorkspaceDialog() {
+  // 异步加载目录列表，不阻塞按钮状态更新
+  const isAtDefault = wsBrowsePath === wsDefaultRoot || wsBrowsePath === '/';
+  const canGoParent = !isAtDefault;
+  const canGoBack = wsHistoryIdx > 0;
+  const canGoNext = wsHistoryIdx < wsHistory.length - 1;
+
+  const inp = document.getElementById('wsPathInput');
+  if (inp) inp.value = wsBrowsePath;
+  const btnParent = document.getElementById('wsBtnParent');
+  if (btnParent) btnParent.disabled = !canGoParent;
+  const btnNext = document.getElementById('wsBtnNext');
+  if (btnNext) btnNext.disabled = !canGoNext;
+  const btnBack = document.getElementById('wsBtnBack');
+  if (btnBack) btnBack.disabled = !canGoBack;
+
+  const container = document.getElementById('wsDirList');
+  if (!container) return;
+  const r = await apiFetch('/fs/children', { method: 'POST', body: JSON.stringify({ path: wsBrowsePath }) });
+  if (!r || (!r.dirs && !r.files)) {
+    container.innerHTML = '<div class="text-secondary small p-3">无法读取目录内容</div>';
+    return;
+  }
+  let html = '';
+  if (!isAtDefault) {
+    html += '<div class="ve-ws-item py-2 px-3 border-bottom border-secondary-subtle cursor-pointer text-secondary" onclick="wsGoParent()">' +
+      '<i class="bi bi-arrow-return-left me-2"></i>.. 返回上级</div>';
+  }
+  html += '<div class="ve-ws-item py-2 px-3 border-bottom border-secondary-subtle cursor-pointer text-primary" onclick="wsGoDefault()">' +
+    '<i class="bi bi-house me-2"></i>默认工作区</div>';
+  (r.dirs || []).forEach(d => {
+    html += '<div class="ve-ws-item py-2 px-3 border-bottom border-secondary-subtle cursor-pointer" onclick="wsOpenDir(\'' + esc(d.path) + '\')">' +
+      '<i class="bi bi-folder2 me-2 text-warning"></i>' + esc(d.name) + '</div>';
+  });
+  (r.files || []).slice(0, 80).forEach(f => {
+    html += '<div class="ve-ws-item py-1 px-3 border-bottom border-secondary-subtle text-secondary small">' +
+      '<i class="bi bi-file-earmark me-2"></i>' + esc(f.name) +
+      '<span class="ms-2">' + formatSize(f.size) + '</span></div>';
+  });
+  if ((r.files || []).length > 80) {
+    html += '<div class="px-3 py-2 text-secondary small">… 还有 ' + ((r.files.length || 0) - 80) + ' 个文件</div>';
+  }
+  container.innerHTML = html || '<div class="text-secondary small p-3">该目录为空</div>';
 }
 
 async function selectWorkspace(docId) {
@@ -1110,7 +1221,7 @@ function renderEditor() {
       '<span>' +
         '<button class="btn btn-sm btn-outline-secondary me-1" title="新建文件" onclick="createFile()"><i class="bi bi-file-earmark-plus"></i></button>' +
         '<button class="btn btn-sm btn-outline-secondary me-1" title="新建文件夹" onclick="createFolder()"><i class="bi bi-folder-plus"></i></button>' +
-        '<button class="btn btn-sm btn-outline-info me-1" title="打开工作区" onclick="openWorkspaceModal()"><i class="bi bi-folder-open"></i></button>' +
+        '<button class="btn btn-sm btn-outline-secondary me-1" title="打开工作区" onclick="openWorkspaceModal()"><i class="bi bi-folder-open"></i></button>' +
         (editor.activeDocId ? '<button class="btn btn-sm btn-outline-danger" title="删除当前文档" onclick="deleteDoc(editor.activeDocId)"><i class="bi bi-trash3"></i></button>' : '') +
       '</span>' +
     '</div>' +
@@ -1186,9 +1297,6 @@ function renderEditor() {
     '<nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom border-secondary-subtle px-2 py-1 flex-shrink-0">' +
       '<div class="container-fluid">' +
         '<a class="navbar-brand ve-brand mb-0" href="#/editor"><i class="bi bi-journal-richtext me-1"></i><span class="ve-logo-text">VanillaEditor</span></a>' +
-        '<button class="navbar-toggler border-0 shadow-none" type="button" id="veSidebarToggler" aria-label="打开侧边栏">' +
-          '<i class="bi bi-layout-sidebar"></i>' +
-        '</button>' +
         '<button class="navbar-toggler border-0 shadow-none d-lg-none" type="button" id="veMenuToggler" aria-label="打开菜单">' +
           '<i class="bi bi-list"></i>' +
         '</button>' +
@@ -1344,16 +1452,96 @@ function renderEditor() {
 }
 
 // ── Settings page ────────────────────────────────────────────
+let currentSettingTab = 'account';
+
 async function renderSetting() {
   const app = document.getElementById('app');
   let me = null;
   try { me = await apiFetch('/auth/me'); } catch (e) {}
   if (!me) return;
 
-  // 若已打开文档，加载其远端列表
-  let remoteList = [];
-  if (editor.activeDocId) {
-    try { const r = await apiFetch('/sync/remote', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId }) }); if (r) remoteList = r; } catch (e) {}
+  const menuItems = [
+    { id: 'account', icon: 'bi-person-badge', label: '账号管理' },
+    { id: 'network', icon: 'bi-shield-lock', label: '网络与安全' },
+    { id: 'version', icon: 'bi-git', label: '版本管理与同步' },
+    { id: 'about', icon: 'bi-info-circle', label: '关于' },
+  ];
+
+  function renderContent(tab) {
+    switch (tab) {
+      case 'account':
+        return '<div class="card h-100">' +
+          '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-person-badge me-1"></i>账号信息</div>' +
+          '<div class="card-body">' +
+            '<div class="d-flex align-items-center mb-4">' +
+              '<i class="bi bi-person-circle fs-1 me-3 text-secondary"></i>' +
+              '<div>' +
+                '<div class="fw-semibold fs-5">' + esc(me.username) + '</div>' +
+                '<div class="text-secondary small">本地账号，数据存储于 data/' + esc(me.username) + '/</div>' +
+              '</div>' +
+            '</div>' +
+            '<button class="btn btn-outline-danger w-100" onclick="logout()"><i class="bi bi-box-arrow-right me-1"></i>退出登录</button>' +
+          '</div>' +
+        '</div>';
+      case 'network':
+        return '<div class="card h-100">' +
+          '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-shield-lock me-1"></i>远程访问控制</div>' +
+          '<div class="card-body">' +
+            '<p class="text-secondary small">远程控制功能开发中，敬请期待。</p>' +
+          '</div>' +
+          '<div class="card-header bg-transparent border-secondary-subtle mt-3"><i class="bi bi-hdd-network me-1"></i>同步远端设备</div>' +
+          '<div class="card-body">' +
+            '<p class="text-secondary small mb-2">将其他设备的 VE 地址添加为 Git 远端，即可端到端同步。当前作用文档：' +
+              (editor.activeDocId ? '<span class="badge text-bg-secondary ms-1">' + esc(editor.activeDocId) + '</span>' : '<span class="text-warning ms-1">未选择</span>') +
+            '</p>' +
+            '<div class="input-group mb-3">' +
+              '<input id="newRemoteUrl" class="form-control" placeholder="http://192.168.1.x:5000">' +
+              '<button class="btn btn-primary" onclick="addRemote()"><i class="bi bi-plus-lg"></i></button>' +
+            '</div>' +
+            ((function() { var r = []; try { if (editor.activeDocId) { var x = apiFetch('/sync/remote', {method:'POST',body:JSON.stringify({doc_id:editor.activeDocId})}); x.then(function(d){r=d||[];}); } } catch(e){} return r; })()) || [] ).length === 0 ?
+              '<div class="text-secondary small">暂无远端设备</div>' : '') +
+          '</div>' +
+        '</div>';
+      case 'version':
+        return '<div class="card h-100">' +
+          '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-git me-1"></i>Git 版本管理</div>' +
+          '<div class="card-body">' +
+            '<p class="text-secondary small mb-3">当前作用文档：' +
+              (editor.activeDocId ? '<span class="badge text-bg-secondary ms-1">' + esc(editor.activeDocId) + '</span>' : '<span class="text-warning ms-1">未选择</span>') +
+            '</p>' +
+            '<div class="d-grid gap-2">' +
+              '<button class="btn btn-outline-secondary text-start" onclick="menuGitConfig()"><i class="bi bi-person-vcard me-2"></i>设置 Git 基础信息</button>' +
+              '<button class="btn btn-outline-secondary text-start" onclick="menuRemotes()"><i class="bi bi-hdd-network me-2"></i>配置远程仓库</button>' +
+              '<button class="btn btn-outline-secondary text-start" onclick="menuNewBranch()"><i class="bi bi-plus-square me-2"></i>添加新分支</button>' +
+              '<button class="btn btn-outline-secondary text-start" onclick="menuSwitchBranch()"><i class="bi bi-arrow-left-right me-2"></i>切换分支</button>' +
+              '<button class="btn btn-outline-secondary text-start" onclick="menuMergeBranch()"><i class="bi bi-sign-merge-left me-2"></i>合并分支</button>' +
+              '<button class="btn btn-outline-secondary text-start" onclick="menuReset()"><i class="bi bi-arrow-counterclockwise me-2"></i>回退版本</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      case 'about':
+        return '<div class="card h-100">' +
+          '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-info-circle me-1"></i>关于</div>' +
+          '<div class="card-body">' +
+            '<div class="d-flex align-items-center mb-3">' +
+              '<i class="bi bi-journal-richtext fs-1 me-3" style="color:var(--ve-accent)"></i>' +
+              '<div>' +
+                '<div class="fw-semibold fs-5" style="color:var(--ve-accent)">VanillaEditor</div>' +
+                '<div class="text-secondary small">v0.1.0 — 分布式离线 Markdown 编辑器</div>' +
+              '</div>' +
+            '</div>' +
+            '<p class="text-secondary small">每台设备独立运行，数据完全存储在本地，通过 Git 协议实现设备间端到端同步，无需任何第三方服务器。</p>' +
+            '<hr class="border-secondary-subtle">' +
+            '<div class="text-secondary small">' +
+              '<div><i class="bi bi-check2 me-1"></i>完全离线可用</div>' +
+              '<div><i class="bi bi-check2 me-1"></i>端到端 Git 同步</div>' +
+              '<div><i class="bi bi-check2 me-1"></i>版本回溯与分支管理</div>' +
+              '<div><i class="bi bi-check2 me-1"></i>工作区支持（本地目录直接打开）</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      default: return '';
+    }
   }
 
   app.innerHTML =
@@ -1380,14 +1568,16 @@ async function renderSetting() {
       '</div>' +
     '</nav>' +
 
-    // left-side menu offcanvas (mobile only)
-    '<div class="offcanvas offcanvas-start d-lg-none" tabindex="-1" id="veSettingsMenuOffcanvas" aria-labelledby="veSettingsMenuOffcanvasLabel">' +
+    // mobile settings menu offcanvas
+    '<div class="offcanvas offcanvas-end d-lg-none" tabindex="-1" id="veSettingsMenuOffcanvas" aria-labelledby="veSettingsMenuOffcanvasLabel">' +
       '<div class="offcanvas-header border-bottom border-secondary-subtle">' +
-        '<h6 class="offcanvas-title text-uppercase text-secondary" id="veSettingsMenuOffcanvasLabel" style="font-size:11px;letter-spacing:1px">菜单</h6>' +
+        '<h6 class="offcanvas-title text-uppercase text-secondary" id="veSettingsMenuOffcanvasLabel" style="font-size:11px;letter-spacing:1px">设置</h6>' +
         '<button type="button" class="btn-close" id="veSettingsMenuClose" aria-label="关闭"></button>' +
       '</div>' +
       '<div class="offcanvas-body p-0">' +
         '<ul class="list-unstyled mb-0">' +
+          menuItems.map(m => '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="switchSettingTab(\'' + m.id + '\');closeSettingsMenu()"><i class="bi bi-' + m.icon + ' me-2"></i>' + m.label + '</a></li>').join('') +
+          '<li><hr class="dropdown-divider my-0"></li>' +
           '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#/editor"><i class="bi bi-pencil-square me-2"></i>编辑器</a></li>' +
           '<li><hr class="dropdown-divider my-0"></li>' +
           '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="logout()"><i class="bi bi-box-arrow-right me-2"></i>退出登录</a></li>' +
@@ -1395,78 +1585,159 @@ async function renderSetting() {
       '</div>' +
     '</div>' +
 
-    '<div class="container-fluid py-4 overflow-auto flex-grow-1">' +
-      '<div class="row justify-content-center g-3">' +
-        // 用户信息
-        '<div class="col-12 col-md-6 col-xl-4">' +
-          '<div class="card h-100">' +
-            '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-person-badge me-1"></i>用户信息</div>' +
-            '<div class="card-body">' +
-              '<div class="d-flex align-items-center mb-3">' +
-                '<i class="bi bi-person-circle fs-1 me-3 text-secondary"></i>' +
-                '<div>' +
-                  '<div class="fw-semibold">' + esc(me.username) + '</div>' +
-                  '<div class="text-secondary small">本地账号，数据存储于 data/' + esc(me.username) + '/</div>' +
-                '</div>' +
-              '</div>' +
-              '<button class="btn btn-outline-danger w-100" onclick="logout()"><i class="bi bi-box-arrow-right me-1"></i>退出登录</button>' +
-            '</div>' +
-          '</div>' +
+    '<div class="d-flex flex-grow-1 overflow-hidden">' +
+      // left menu sidebar
+      '<nav class="d-flex flex-column flex-shrink-0 border-end border-secondary-subtle" style="width:200px;background:var(--bs-body-bg)">' +
+        '<div class="p-3 border-bottom border-secondary-subtle">' +
+          '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">设置</span>' +
         '</div>' +
-        // 编辑器设置
-        '<div class="col-12 col-md-6 col-xl-4">' +
-          '<div class="card h-100">' +
-            '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-sliders me-1"></i>编辑器</div>' +
-            '<div class="card-body">' +
-              '<label class="form-label small text-secondary" for="fsSelect">字体大小</label>' +
-              '<select class="form-select mb-3" id="fsSelect" onchange="onFontSizeChange(this.value)">' +
-                [12, 14, 16, 18, 20].map(s => '<option value="' + s + '"' + (s === fontSize ? ' selected' : '') + '>' + s + ' px</option>').join('') +
-              '</select>' +
-              '<div class="text-secondary small"><i class="bi bi-info-circle me-1"></i>设置自动保存在浏览器本地</div>' +
-            '</div>' +
-          '</div>' +
+        '<div class="flex-grow-1 overflow-auto py-2">' +
+          menuItems.map(m =>
+            '<div class="ve-setting-menu-item px-3 py-2 cursor-pointer d-flex align-items-center gap-2' +
+              (currentSettingTab === m.id ? ' active text-body bg-body-tertiary border-start border-primary' : ' text-secondary') + '"' +
+              ' onclick="switchSettingTab(\'' + m.id + '\')">' +
+              '<i class="bi bi-' + m.icon + '"></i>' +
+              '<span class="small">' + m.label + '</span>' +
+            '</div>'
+          ).join('') +
         '</div>' +
-        // 远程设备 / 同步
-        '<div class="col-12 col-xl-4">' +
-          '<div class="card h-100">' +
-            '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-hdd-network me-1"></i>远程设备（同步）</div>' +
-            '<div class="card-body">' +
-              '<p class="text-secondary small mb-2">将其他设备的 VE 地址添加为 Git 远端，即可端到端同步。当前作用文档：' +
-                (editor.activeDocId ? '<span class="badge text-bg-secondary">' + esc(editor.activeDocId) + '</span>' : '<span class="text-warning">未选择</span>') +
-              '</p>' +
-              '<div class="input-group mb-3">' +
-                '<input id="newRemoteUrl" class="form-control" placeholder="http://192.168.1.x:5000">' +
-                '<button class="btn btn-primary" onclick="addRemote()"><i class="bi bi-plus-lg"></i></button>' +
-              '</div>' +
-              (remoteList.length === 0 ?
-                '<div class="text-secondary small">暂无远端设备</div>' :
-                remoteList.map(r =>
-                  '<div class="d-flex align-items-center gap-2 py-1 border-bottom border-secondary-subtle small">' +
-                    '<i class="bi bi-router text-secondary"></i>' +
-                    '<span class="flex-grow-1 text-truncate">' + esc(r.name) + '</span>' +
-                    '<span class="text-secondary text-truncate" style="max-width:45%">' + esc(r.url) + '</span>' +
-                    '<button class="btn btn-sm btn-outline-danger py-0" title="移除" onclick="removeRemote(\'' + esc(r.name) + '\')"><i class="bi bi-x-lg"></i></button>' +
-                  '</div>').join('')) +
-            '</div>' +
-          '</div>' +
-        '</div>' +
-        // 关于
-        '<div class="col-12">' +
-          '<div class="card">' +
-            '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-info-circle me-1"></i>关于</div>' +
-            '<div class="card-body text-secondary small">' +
-              'VanillaEditor v0.1.0 — 分布式离线 Markdown 编辑器。数据完全存储在本地（data/ 目录），不上传任何第三方服务器；' +
-              '文档以 Git 仓库形式保存，支持版本回溯与设备间端到端同步。' +
-            '</div>' +
-          '</div>' +
-        '</div>' +
+      '</nav>' +
+      // content area
+      '<div class="flex-grow-1 overflow-auto p-4" id="veSettingContent">' +
+        renderContent(currentSettingTab) +
       '</div>' +
     '</div>' +
 
+    // status bar
     '<div class="d-flex align-items-center gap-3 px-3 flex-shrink-0 text-white small" style="height:24px;background-color:#0d6efd">' +
       '<span class="ms-auto">VanillaEditor v0.1.0</span>' +
       '<span id="veClock">' + new Date().toLocaleTimeString() + '</span>' +
     '</div>';
+
+  // init offcanvas
+  const sc = document.getElementById('veSettingsMenuClose');
+  const st = document.getElementById('veSettingsToggler');
+  if (sc) sc.addEventListener('click', closeSettingsMenu);
+  if (st) st.addEventListener('click', () => { const el = document.getElementById('veSettingsMenuOffcanvas'); if (!el.classList.contains('show')) el.classList.add('show'); });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#veSettingsMenuOffcanvas') && !e.target.closest('#veSettingsToggler')) {
+      closeSettingsMenu();
+    }
+  });
+  // lazy load remote list for network tab
+  if (currentSettingTab === 'network') loadRemoteListIntoSetting();
+}
+
+function switchSettingTab(tab) {
+  currentSettingTab = tab;
+  const items = document.querySelectorAll('.ve-setting-menu-item');
+  const menuIds = ['account', 'network', 'version', 'about'];
+  items.forEach((el, i) => {
+    const isActive = menuIds[i] === tab;
+    el.className = 've-setting-menu-item px-3 py-2 cursor-pointer d-flex align-items-center gap-2' +
+      (isActive ? ' active text-body bg-body-tertiary border-start border-primary' : ' text-secondary');
+  });
+  const content = document.getElementById('veSettingContent');
+  if (content) content.innerHTML = renderSettingContent(tab);
+  if (tab === 'network') loadRemoteListIntoSetting();
+}
+
+function renderSettingContent(tab) {
+  // account
+  if (tab === 'account') {
+    return '<div class="card h-100" style="max-width:500px">' +
+      '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-person-badge me-1"></i>账号信息</div>' +
+      '<div class="card-body">' +
+        '<div class="d-flex align-items-center mb-4">' +
+          '<i class="bi bi-person-circle fs-1 me-3 text-secondary"></i>' +
+          '<div>' +
+            '<div class="fw-semibold fs-5">' + esc(auth.username) + '</div>' +
+            '<div class="text-secondary small">本地账号，数据存储于 data/' + esc(auth.username) + '/</div>' +
+          '</div>' +
+        '</div>' +
+        '<button class="btn btn-outline-danger w-100" onclick="logout()"><i class="bi bi-box-arrow-right me-1"></i>退出登录</button>' +
+      '</div>' +
+    '</div>';
+  }
+  // network
+  if (tab === 'network') {
+    return '<div class="card h-100" style="max-width:500px">' +
+      '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-shield-lock me-1"></i>远程访问控制</div>' +
+      '<div class="card-body">' +
+        '<p class="text-secondary small">远程控制功能开发中，敬请期待。</p>' +
+      '</div>' +
+      '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-hdd-network me-1"></i>同步远端设备</div>' +
+      '<div class="card-body" id="veRemoteListBody"></div>' +
+    '</div>';
+  }
+  // version
+  if (tab === 'version') {
+    return '<div class="card h-100" style="max-width:500px">' +
+      '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-git me-1"></i>Git 版本管理</div>' +
+      '<div class="card-body">' +
+        '<p class="text-secondary small mb-3">当前作用文档：' +
+          (editor.activeDocId ? '<span class="badge text-bg-secondary ms-1">' + esc(editor.activeDocId) + '</span>' : '<span class="text-warning ms-1">未选择</span>') +
+        '</p>' +
+        '<div class="d-grid gap-2">' +
+          '<button class="btn btn-outline-secondary text-start" onclick="menuGitConfig()"><i class="bi bi-person-vcard me-2"></i>设置 Git 基础信息</button>' +
+          '<button class="btn btn-outline-secondary text-start" onclick="menuRemotes()"><i class="bi bi-hdd-network me-2"></i>配置远程仓库</button>' +
+          '<button class="btn btn-outline-secondary text-start" onclick="menuNewBranch()"><i class="bi bi-plus-square me-2"></i>添加新分支</button>' +
+          '<button class="btn btn-outline-secondary text-start" onclick="menuSwitchBranch()"><i class="bi bi-arrow-left-right me-2"></i>切换分支</button>' +
+          '<button class="btn btn-outline-secondary text-start" onclick="menuMergeBranch()"><i class="bi bi-sign-merge-left me-2"></i>合并分支</button>' +
+          '<button class="btn btn-outline-secondary text-start" onclick="menuReset()"><i class="bi bi-arrow-counterclockwise me-2"></i>回退版本</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+  // about
+  if (tab === 'about') {
+    return '<div class="card h-100" style="max-width:500px">' +
+      '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-info-circle me-1"></i>关于</div>' +
+      '<div class="card-body">' +
+        '<div class="d-flex align-items-center mb-3">' +
+          '<i class="bi bi-journal-richtext fs-1 me-3" style="color:var(--ve-accent)"></i>' +
+          '<div>' +
+            '<div class="fw-semibold fs-5" style="color:var(--ve-accent)">VanillaEditor</div>' +
+            '<div class="text-secondary small">v0.1.0 — 分布式离线 Markdown 编辑器</div>' +
+          '</div>' +
+        '</div>' +
+        '<p class="text-secondary small">每台设备独立运行，数据完全存储在本地，通过 Git 协议实现设备间端到端同步，无需任何第三方服务器。</p>' +
+        '<hr class="border-secondary-subtle">' +
+        '<div class="text-secondary small">' +
+          '<div><i class="bi bi-check2 me-1"></i>完全离线可用</div>' +
+          '<div><i class="bi bi-check2 me-1"></i>端到端 Git 同步</div>' +
+          '<div><i class="bi bi-check2 me-1"></i>版本回溯与分支管理</div>' +
+          '<div><i class="bi bi-check2 me-1"></i>工作区支持（本地目录直接打开）</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+  return '';
+}
+
+async function loadRemoteListIntoSetting() {
+  const body = document.getElementById('veRemoteListBody');
+  if (!body) return;
+  let remoteList = [];
+  if (editor.activeDocId) {
+    try { const r = await apiFetch('/sync/remote', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId }) }); if (r) remoteList = r; } catch (e) {}
+  }
+  body.innerHTML = remoteList.length === 0
+    ? '<div class="text-secondary small">暂无远端设备</div>'
+    : remoteList.map(r =>
+        '<div class="d-flex align-items-center gap-2 py-1 border-bottom border-secondary-subtle small">' +
+          '<i class="bi bi-router text-secondary"></i>' +
+          '<span class="flex-grow-1 text-truncate">' + esc(r.name) + '</span>' +
+          '<span class="text-secondary text-truncate" style="max-width:45%">' + esc(r.url) + '</span>' +
+          '<button class="btn btn-sm btn-outline-danger py-0" title="移除" onclick="removeRemote(\'' + esc(r.name) + '\')"><i class="bi bi-x-lg"></i></button>' +
+        '</div>').join('');
+}
+
+function closeSettingsMenu() {
+  const el = document.getElementById('veSettingsMenuOffcanvas');
+  if (el) el.classList.remove('show');
+  document.querySelector('.offcanvas-backdrop')?.remove();
+  document.body.classList.remove('modal-open');
 }
 
 // ── Routes ───────────────────────────────────────────────────
