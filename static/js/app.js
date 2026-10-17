@@ -1749,19 +1749,9 @@ Router.register('#/setting', async () => {
 });
 
 // ── Init ─────────────────────────────────────────────────────
-window.addEventListener('error', e => {
-  console.error('[VE Error]', e.message, e.filename, e.lineno);
-});
-try {
-  console.log('[VE] Init: isLoggedIn=', auth.isLoggedIn, 'hash=', location.hash);
-  if (!location.hash) location.hash = auth.isLoggedIn ? '#/editor' : '#/login';
-  console.log('[VE] Init: routing to', location.hash);
-  Router.render();
-  console.log('[VE] Router rendered, hash:', location.hash);
-} catch (e) {
-  console.error('[VE Init Error]', e);
-  document.getElementById('app').innerHTML = '<div class="p-4 text-danger">初始化错误：' + e.message + '</div>';
-}
+window.addEventListener('error', e => console.error('[VE Error]', e.message));
+if (!location.hash) location.hash = auth.isLoggedIn ? '#/editor' : '#/login';
+Router.render();
 
 window.addEventListener('resize', () => {
   if (location.hash === '#/editor') applyMobilePreviewState();
