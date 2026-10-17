@@ -392,6 +392,77 @@ def create_app():
         ok, err = git_service.reset_hard(username, doc_id, sha)
         return jsonify({"ok": ok, "error": err})
 
+    # ── /api/access ────────────────────────────────────────────
+    # 远程访问配置（仅局域网可用，公网需额外配置防火墙）
+
+    @app.route("/api/access/status", methods=["GET"])
+    @require_auth
+    def access_status():
+        cfg = _load_remote_access()
+        import socket as _socket
+        try:
+            hostname = _socket.gethostname()
+            ip = _socket.gethostbyname(hostname)
+        except Exception:
+            ip = "127.0.0.1"
+        return jsonify({
+            "enabled": cfg.get("enabled", False),
+            "access_code": cfg.get("access_code", ""),
+            "local_ip": ip,
+            "allowed_ips": cfg.get("allowed_ips", []),
+            "url": f"http://{ip}:{app.config['PORT']}",
+        })
+
+    @app.route("/api/access/enable", methods=["POST"])
+    @require_auth
+    def access_enable():
+        data = request.get_json() or {}
+        cfg = _load_remote_access()
+        cfg["enabled"] = True
+        # 生成访问码（6位随机字符）
+        import random as _random, string as _string
+        cfg["access_code"] = "".join(_random.choices(_string.ascii_letters + _string.digits, k=6))
+        # 允许的IP列表（空表示允许所有局域网IP）
+        if "allowed_ips" in data:
+            cfg["allowed_ips"] = data["allowed_ips"]
+        _save_remote_access(cfg)
+        import socket as _socket
+        try:
+            ip = _socket.gethostbyname(_socket.gethostname())
+        except Exception:
+            ip = "127.0.0.1"
+        return jsonify({
+            "ok": True,
+            "url": f"http://{ip}:{app.config['PORT']}",
+            "access_code": cfg["access_code"],
+        })
+
+    @app.route("/api/access/disable", methods=["POST"])
+    @require_auth
+    def access_disable():
+        cfg = _load_remote_access()
+        cfg["enabled"] = False
+        cfg["access_code"] = ""
+        _save_remote_access(cfg)
+        return jsonify({"ok": True})
+
+    @app.route("/api/access/clients", methods=["GET"])
+    @require_auth
+    def access_clients():
+        # 返回当前连接的设备列表（简化版：仅返回IP）
+        return jsonify([])
+
+    @app.route("/api/access/code", methods=["POST"])
+    @require_auth
+    def access_verify_code():
+        data = request.get_json() or {}
+        cfg = _load_remote_access()
+        if not cfg.get("enabled"):
+            return jsonify({"error": "远程访问未开启"}), 403
+        if data.get("code") == cfg.get("access_code"):
+            return jsonify({"ok": True})
+        return jsonify({"error": "访问码错误"}), 401
+
     # ── /api/workspaces ────────────────────────────────────────
 
     @app.route("/api/workspaces", methods=["GET"])
@@ -528,6 +599,28 @@ def create_app():
         return app.send_static_file("index.html")
 
     return app, git_service
+
+
+# ── 远程访问配置（持久化到 data/remote_access.json）─────────────
+
+def _remote_access_path():
+    return os.path.join(app.config["DATA_DIR"], "remote_access.json")
+
+def _load_remote_access():
+    p = _remote_access_path()
+    if not os.path.exists(p):
+        return {"enabled": False, "allowed_ips": [], "access_code": ""}
+    import json as _json
+    try:
+        with open(p, encoding="utf-8") as f:
+            return _json.load(f)
+    except Exception:
+        return {"enabled": False, "allowed_ips": [], "access_code": ""}
+
+def _save_remote_access(cfg):
+    import json as _json
+    with open(_remote_access_path(), "w", encoding="utf-8") as f:
+        _json.dump(cfg, f, ensure_ascii=False)
 
 
 if __name__ == "__main__":

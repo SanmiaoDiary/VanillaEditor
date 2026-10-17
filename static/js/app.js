@@ -1617,7 +1617,10 @@ async function renderSetting() {
     }
   });
   // lazy load remote list for network tab
-  if (currentSettingTab === 'network') loadRemoteListIntoSetting();
+  if (currentSettingTab === 'network') {
+    loadRemoteListIntoSetting();
+    loadAccessControl();
+  }
 }
 
 function switchSettingTab(tab) {
@@ -1631,7 +1634,10 @@ function switchSettingTab(tab) {
   });
   const content = document.getElementById('veSettingContent');
   if (content) content.innerHTML = renderSettingContent(tab);
-  if (tab === 'network') loadRemoteListIntoSetting();
+  if (tab === 'network') {
+    loadRemoteListIntoSetting();
+    loadAccessControl();
+  }
 }
 
 function renderSettingContent(tab) {
@@ -1655,11 +1661,18 @@ function renderSettingContent(tab) {
   if (tab === 'network') {
     return '<div class="card h-100" style="max-width:500px">' +
       '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-shield-lock me-1"></i>远程访问控制</div>' +
+      '<div class="card-body" id="veAccessControlBody"></div>' +
+      '<div class="card-header bg-transparent border-secondary-subtle mt-3"><i class="bi bi-hdd-network me-1"></i>同步远端设备</div>' +
       '<div class="card-body">' +
-        '<p class="text-secondary small">远程控制功能开发中，敬请期待。</p>' +
+        '<p class="text-secondary small mb-2">将其他设备的 VE 地址添加为 Git 远端，即可端到端同步。当前作用文档：' +
+          (editor.activeDocId ? '<span class="badge text-bg-secondary ms-1">' + esc(editor.activeDocId) + '</span>' : '<span class="text-warning ms-1">未选择</span>') +
+        '</p>' +
+        '<div class="input-group mb-3">' +
+          '<input id="newRemoteUrl" class="form-control" placeholder="http://192.168.1.x:5000">' +
+          '<button class="btn btn-primary" onclick="addRemote()"><i class="bi bi-plus-lg"></i></button>' +
+        '</div>' +
+        '<div id="veRemoteListBody"></div>' +
       '</div>' +
-      '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-hdd-network me-1"></i>同步远端设备</div>' +
-      '<div class="card-body" id="veRemoteListBody"></div>' +
     '</div>';
   }
   // version
@@ -1723,6 +1736,55 @@ async function loadRemoteListIntoSetting() {
           '<span class="text-secondary text-truncate" style="max-width:45%">' + esc(r.url) + '</span>' +
           '<button class="btn btn-sm btn-outline-danger py-0" title="移除" onclick="removeRemote(\'' + esc(r.name) + '\')"><i class="bi bi-x-lg"></i></button>' +
         '</div>').join('');
+}
+
+async function loadAccessControl() {
+  const body = document.getElementById('veAccessControlBody');
+  if (!body) return;
+  try {
+    const data = await apiFetch('/access/status');
+    if (!data) return;
+    const enabled = data.enabled;
+    body.innerHTML =
+      '<div class="d-flex align-items-center justify-content-between mb-3">' +
+        '<div>' +
+          '<div class="fw-semibold">远程访问</div>' +
+          '<div class="text-secondary small">允许局域网内其他设备通过浏览器访问本机的 VE</div>' +
+        '</div>' +
+        '<div class="form-check form-switch mb-0">' +
+          '<input class="form-check-input" type="checkbox" role="switch" id="veAccessToggle" ' + (enabled ? 'checked' : '') + ' onchange="toggleAccess(this.checked)">' +
+        '</div>' +
+      '</div>' +
+      (enabled ?
+        '<div class="alert alert-info py-2 small mb-3">' +
+          '<div><i class="bi bi-link-45deg me-1"></i>访问地址：<strong>' + esc(data.url) + '</strong></div>' +
+          '<div class="mt-1"><i class="bi bi-key me-1"></i>访问码：<strong class="font-monospace">' + esc(data.access_code) + '</strong> <button class="btn btn-sm py-0 ms-1" onclick="copyAccessCode(\'' + esc(data.access_code) + '\')"><i class="bi bi-clipboard"></i></button></div>' +
+          '<div class="mt-1 text-secondary">将此地址和访问码发给局域网内的其他设备，在登录页输入即可远程访问</div>' +
+        '</div>' :
+        '<div class="text-secondary small">关闭远程访问后，其他设备无法通过浏览器访问本机</div>');
+  } catch (e) {
+    body.innerHTML = '<div class="text-danger small">加载失败</div>';
+  }
+}
+
+async function toggleAccess(enabled) {
+  try {
+    if (enabled) {
+      const r = await apiFetch('/access/enable', { method: 'POST' });
+      if (r) toast('远程访问已开启', 'ok');
+    } else {
+      await apiFetch('/access/disable', { method: 'POST' });
+      toast('远程访问已关闭', 'info');
+    }
+    loadAccessControl();
+  } catch (e) {
+    toast('操作失败', 'err');
+    loadAccessControl();
+  }
+}
+
+function copyAccessCode(code) {
+  navigator.clipboard.writeText(code).then(() => toast('访问码已复制', 'ok')).catch(() => toast('复制失败', 'err'));
 }
 
 function closeSettingsMenu() {

@@ -3,8 +3,8 @@ html, body { height: 100%; }
 body { overflow: hidden; }
 #app { height: 100vh; display: flex; flex-direction: column; }
 
-.ve-brand { color: var(--ve-accent); font-weight: 600; text-decoration: none; }
-.ve-brand:hover { color: var(--ve-accent); opacity: .85; }
+.ve-brand { color: var(--bs-secondary-color); font-weight: 600; text-decoration: none; transition: color .15s; }
+.ve-brand:hover, .ve-brand:focus { color: var(--ve-accent) !important; opacity: 1; }
 .ve-logo-text { white-space: nowrap; }
 
 /* activity bar */
