@@ -1753,7 +1753,9 @@ window.addEventListener('error', e => {
   console.error('[VE Error]', e.message, e.filename, e.lineno);
 });
 try {
+  console.log('[VE] Init: isLoggedIn=', auth.isLoggedIn, 'hash=', location.hash);
   if (!location.hash) location.hash = auth.isLoggedIn ? '#/editor' : '#/login';
+  console.log('[VE] Init: routing to', location.hash);
   Router.render();
   console.log('[VE] Router rendered, hash:', location.hash);
 } catch (e) {
