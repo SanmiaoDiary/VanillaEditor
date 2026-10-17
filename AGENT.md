@@ -1,8 +1,75 @@
 # AGENT.md — VanillaEditor 项目开发规范
 
+## 项目概况
+
+**VanillaEditor** 是一款分布式离线 Markdown 编辑器。每台设备独立运行，数据完全存储在本地，通过 Git 协议实现设备间端到端同步，无需任何第三方服务器。
+
+**核心特性：**
+- 完全离线可用，无网络时正常编辑
+- 端到端同步：设备间通过 Git 直接互相同步，各自维护完整副本
+- 版本管理：每次编辑自动记录 Git 提交，随时回溯历史版本
+- 工作区支持：可将任意本地文件夹作为工作区打开，编辑时内容同步回源目录
+- 单用户设计，数据安全私有
+
+**技术栈：**
+| 层 | 技术 |
+|----|------|
+| 后端 | Python 3.10+、Flask 3.0 |
+| 前端 | 原生 JS，hash 路由，无构建步骤 |
+| UI | Bootstrap 5.3.3 + Bootstrap Icons（静态本地） |
+| 版本控制 | Git（subprocess 调用 CLI） |
+| 认证 | bcrypt + JWT |
+
+---
+
+## 更新日志
+
+### v0.1.1 — 2026-10-17
+
+**feat:** 添加 Markdown 语法高亮
+- 编辑器文本框内实时显示语法高亮（标题颜色、加粗、斜体、链接、代码块等）
+- 采用 overlay 方案：透明 textarea + 背后 `<pre>` 高亮层，滚动自动同步
+- 高亮逻辑复用内置 Markdown 解析函数，无需额外依赖
+
+**feat:** 移动端预览切换
+- 新增预览/编辑切换按钮（<768px 显示），点击可替换编辑器为预览面板或恢复编辑
+- 状态持久化到 localStorage，刷新后保持上次选择
+
+**fix:** 侧边栏 offcanvas 崩溃
+- 修复移动端关闭侧边栏后再次点击按钮报错 `can't access property "backdrop"`
+- 移除 Bootstrap data-bs-* 属性，改用原生事件委托控制 offcanvas 开闭
+
+**fix:** 移动端菜单栏展开方向错误
+- 将菜单 offcanvas 从 `offcanvas-end`（右侧）改为 `offcanvas-start`（左侧）
+- 修复设置页 navbar 在小屏时布局异常问题
+
+**feat:** 添加工作区功能
+- 后端新增 `/api/workspaces` 系列接口：打开/关闭/扫描本地目录
+- 工作区内容复制到 git 仓库管理，编辑保存时同步写回源目录
+- 文件面板新增"打开工作区"按钮，支持路径输入与文件预览
+- 工作区在侧边栏单独分区显示，可一键关闭
+
+---
+
 ## 提交规范
 
 **每次完成任何代码修改后，必须提交 commit。**
+
+```bash
+git add .
+git commit -m "描述你做了什么"
+```
+
+- 提交前确保代码可以正常运行（至少不报语法错误）
+- commit message 必须使用中文，简短描述变更内容
+- 格式：`fix:` / `feat:` / `docs:` / `chore:` 开头（参考 Conventional Commits）
+- 不在 commit 中提交 `static/`、`node_modules/`、`data/`、`__pycache__/`
+
+---
+
+## 项目架构
+
+（其余内容保持不变...）
 
 ```bash
 git add .

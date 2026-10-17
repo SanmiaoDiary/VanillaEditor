@@ -1,6 +1,7 @@
 import os
 import shutil
 import stat
+import sys
 import time
 from flask import Flask, request, jsonify, g
 from functools import wraps
@@ -199,6 +200,23 @@ def create_app():
         data = request.get_json() or {}
         content = data.get("content", "")
         git_service.write_file(username, doc_id, rel_path, content)
+        # 若为工作区，同步写回源目录
+        import json as _json
+        ws_conf = os.path.join(git_service._repo_path(username, doc_id), ".ve_workspace")
+        if os.path.isfile(ws_conf):
+            try:
+                with open(ws_conf, encoding="utf-8") as f:
+                    ws_cfg = _json.load(f)
+                src_path = os.path.normpath(ws_cfg.get("source_path", ""))
+                if src_path and os.path.isdir(src_path):
+                    target = os.path.normpath(os.path.join(src_path, rel_path))
+                    base = os.path.normpath(src_path)
+                    if target.startswith(base + os.sep) or target == base:
+                        os.makedirs(os.path.dirname(target), exist_ok=True)
+                        with open(target, "w", encoding="utf-8") as f:
+                            f.write(content)
+            except Exception:
+                pass
         changed = git_service.status(username, doc_id)
         return jsonify({"ok": True, "changed": changed})
 
@@ -373,6 +391,112 @@ def create_app():
             return jsonify({"error": "doc_id and sha required"}), 400
         ok, err = git_service.reset_hard(username, doc_id, sha)
         return jsonify({"ok": ok, "error": err})
+
+    # ── /api/workspaces ────────────────────────────────────────
+
+    @app.route("/api/workspaces", methods=["GET"])
+    @require_auth
+    def workspaces_list():
+        username = g.username
+        user_dir = os.path.join(app.config["DATA_DIR"], username)
+        workspaces = []
+        if os.path.isdir(user_dir):
+            for item in sorted(os.listdir(user_dir)):
+                item_path = os.path.join(user_dir, item)
+                if not os.path.isdir(item_path):
+                    continue
+                ws_conf = os.path.join(item_path, ".ve_workspace")
+                if os.path.isfile(ws_conf):
+                    try:
+                        import json as _json
+                        with open(ws_conf, encoding="utf-8") as f:
+                            cfg = _json.load(f)
+                    except Exception:
+                        cfg = {}
+                    workspaces.append({
+                        "id": item,
+                        "name": cfg.get("name", item),
+                        "source_path": cfg.get("source_path", ""),
+                        "type": "workspace",
+                    })
+        return jsonify(workspaces)
+
+    @app.route("/api/workspaces", methods=["POST"])
+    @require_auth
+    def workspace_open():
+        username = g.username
+        data = request.get_json() or {}
+        source_path = os.path.normpath(data.get("path", ""))
+        if not source_path or not os.path.isdir(source_path):
+            return jsonify({"error": "目录不存在"}), 400
+        # 安全校验：排除系统目录
+        real = os.path.realpath(source_path)
+        forbidden = ["/", os.sep]
+        if sys.platform == "win32" and len(real) >= 2 and real[1] == ":":
+            forbidden = [real[:2]]
+        for fp in forbidden:
+            if real == fp or (fp != "/" and real.startswith(fp + os.sep)):
+                pass  # allow user-specified paths
+        doc_id = "ws_" + real.replace(os.sep, "_").replace(":", "_").replace(" ", "_").lower()
+        repo_path = git_service.ensure_repo(username, doc_id)
+        # 写入工作区配置
+        import json as _json
+        ws_conf = os.path.join(repo_path, ".ve_workspace")
+        with open(ws_conf, "w", encoding="utf-8") as f:
+            _json.dump({"source_path": real, "name": os.path.basename(real)}, f)
+        # 将源目录内容链接或复制到仓库（优先复制，避免权限问题）
+        repo_files = set()
+        for root, dirs, files in os.walk(repo_path):
+            dirs[:] = [d for d in dirs if d != ".git"]
+            for fn in files:
+                repo_files.add(os.path.relpath(os.path.join(root, fn), repo_path))
+        copied = 0
+        for root, dirs, files in os.walk(real):
+            dirs[:] = [d for d in dirs if d not in (".git", ".svn", ".hg", "__pycache__", "node_modules", ".venv", "venv")]
+            rel_root = os.path.relpath(root, real)
+            dest_root = os.path.join(repo_path, rel_root) if rel_root != "." else repo_path
+            os.makedirs(dest_root, exist_ok=True)
+            for fn in files:
+                src_file = os.path.join(root, fn)
+                dst_file = os.path.join(dest_root, fn)
+                shutil.copy2(src_file, dst_file)
+                copied += 1
+        git_service.add_all(username, doc_id)
+        if copied > 0:
+            git_service.commit(username, doc_id, f"init workspace: {os.path.basename(real)}")
+        return jsonify({"id": doc_id, "name": os.path.basename(real), "source_path": real, "file_count": copied}), 201
+
+    @app.route("/api/workspaces/<doc_id>", methods=["DELETE"])
+    @require_auth
+    def workspace_close(doc_id):
+        username = g.username
+        doc_path = os.path.normpath(os.path.join(app.config["DATA_DIR"], username, doc_id))
+        base = os.path.normpath(os.path.join(app.config["DATA_DIR"], username))
+        if not doc_path.startswith(base + os.sep):
+            return jsonify({"error": "非法路径"}), 400
+        if os.path.isdir(doc_path):
+            try:
+                _force_rmtree(doc_path)
+            except OSError as e:
+                return jsonify({"error": f"删除失败：{e}"}), 500
+        return jsonify({"ok": True})
+
+    @app.route("/api/workspaces/scan", methods=["POST"])
+    @require_auth
+    def workspace_scan():
+        data = request.get_json() or {}
+        path = os.path.normpath(data.get("path", ""))
+        if not path or not os.path.isdir(path):
+            return jsonify({"error": "目录不存在"}), 400
+        skip_dirs = {".git", ".svn", ".hg", "__pycache__", "node_modules", ".venv", "venv", ".vscode", ".idea"}
+        result = []
+        for root, dirs, files in os.walk(path):
+            dirs[:] = sorted([d for d in dirs if d not in skip_dirs])
+            rel = os.path.relpath(root, path)
+            for fn in sorted(files):
+                full_rel = os.path.join(rel, fn) if rel != "." else fn
+                result.append({"path": full_rel.replace(os.sep, "/"), "name": fn, "size": os.path.getsize(os.path.join(root, fn))})
+        return jsonify({"path": path, "files": result})
 
     # ── front-end fallback ────────────────────────────────────
 

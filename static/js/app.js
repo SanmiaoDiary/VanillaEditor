@@ -26,6 +26,7 @@ const editor = {
 };
 let activePanel = 'files';
 let sidebarDocs = [];
+let workspaces = [];
 let expandedDocs = {};
 let commitMsg = '';
 let remotes = [];
@@ -34,6 +35,7 @@ let isRegister = false;
 let loginError = '';
 let saveTimer = null;
 let fontSize = parseInt(localStorage.getItem('ve_font_size') || '14', 10);
+let mobilePreviewMode = localStorage.getItem('ve_mobile_preview') === '1';
 document.documentElement.style.setProperty('--ed-font-size', fontSize + 'px');
 
 // ── API ──────────────────────────────────────────────────────
@@ -185,6 +187,89 @@ function esc(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// ── Markdown syntax highlighter ──────────────────────────────
+function hlMd(src) {
+  if (!src) return '';
+  const escH = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const inl = s => {
+    const codes = [];
+    s = s.replace(/`([^`]+)`/g, (m, c) => { codes.push(c); return '\x00' + codes.length + '\x00'; });
+    s = s.replace(/\*\*\*([^*]+)\*\*\*/g, '<span class="hl-b"><span class="hl-b">$1</span></span>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<span class="hl-b">$1</span>');
+    s = s.replace(/__([^_]+)__/g, '<span class="hl-b">$1</span>');
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<span class="hl-i">$2</span>');
+    s = s.replace(/(^|[^_])_([^_\n]+)_/g, '$1<span class="hl-i">$2</span>');
+    s = s.replace(/~~([^~]+)~~/g, '<span class="hl-d">$1</span>');
+    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<span class="hl-img">[$1]</span><span class="hl-url">($2)</span>');
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<span class="hl-lnk">$1</span><span class="hl-url">($2)</span>');
+    s = s.replace(/\x00(\d+)\x00/g, (m, i) => '<code>' + escH(codes[+i]) + '</code>');
+    return s;
+  };
+
+  const listRe = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
+  const lines = src.replace(/\r\n?/g, '\n').split('\n');
+  let html = '', i = 0;
+
+  const renderList = (items, idx, indent) => {
+    const tag = items[idx].ordered ? 'ol' : 'ul';
+    let h = '<' + tag + '>', j = idx;
+    while (j < items.length && items[j].indent >= indent) {
+      const it = items[j];
+      if (it.indent > indent) {
+        const sub = renderList(items, j, it.indent);
+        h += sub.html; j = sub.next; continue;
+      }
+      h += '<li>' + inl(escH(it.text)) + '</li>';
+      j++;
+    }
+    return { html: h + '</' + tag + '>', next: j };
+  };
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    const fence = line.match(/^```(\S*)\s*$/);
+    if (fence) {
+      const buf = []; i++;
+      while (i < lines.length && !/^```\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
+      i++;
+      html += '<pre><code>' + escH(buf.join('\n')) + '</code></pre>';
+      continue;
+    }
+    if (/^\s*$/.test(line)) { i++; continue; }
+
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { html += '<' + 'h' + h[1].length + ' class="hl-h' + h[1].length + '">' + inl(escH(h[2])) + '</h' + h[1].length + '>'; i++; continue; }
+
+    if (/^\s*([-*_])\s*(\1\s*){2,}$/.test(line)) { html += '<hr class="hl-hr">'; i++; continue; }
+
+    if (/^\s*>/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) { buf.push(lines[i].replace(/^\s*>\s?/, '')); i++; }
+      html += '<blockquote class="hl-bq">' + hlMd(buf.join('\n')) + '</blockquote>';
+      continue;
+    }
+
+    const lm = line.match(listRe);
+    if (lm) {
+      const items = [];
+      while (i < lines.length) {
+        const m = lines[i].match(listRe);
+        if (!m) break;
+        items.push({ indent: m[1].length, ordered: /^\d/.test(m[2]), text: m[3] });
+        i++;
+      }
+      html += renderList(items, 0, items[0].indent).html;
+      continue;
+    }
+
+    const buf2 = [line]; i++;
+    while (i < lines.length && (!/^\s*$/.test(lines[i]) && !/^(#{1,6})\s+/.test(lines[i]) && !/^```/.test(lines[i]) && !/^\s*>/.test(lines[i]) && !listRe.test(lines[i]) && !/^\s*([-*_])\s*(\1\s*){2,}$/.test(lines[i]))) { buf2.push(lines[i]); i++; }
+    html += '<p>' + inl(escH(buf2.join('\n'))) + '</p>';
+  }
+  return html;
+}
+
 // ── Clock (只更新文本，避免整页重绘) ──────────────────────────
 setInterval(() => {
   const c = document.getElementById('veClock');
@@ -271,6 +356,113 @@ async function loadFiles() {
   }
 }
 
+async function loadWorkspaces() {
+  try {
+    const data = await apiFetch('/workspaces');
+    if (data) workspaces = data;
+  } catch (e) { workspaces = []; }
+}
+
+async function openWorkspace(path) {
+  if (!path) return toast('请输入目录路径', 'err');
+  const r = await apiFetch('/workspaces', { method: 'POST', body: JSON.stringify({ path }) });
+  if (r && r.id) {
+    toast('工作区已打开：' + r.name, 'ok');
+    await loadWorkspaces();
+    renderEditor();
+  } else {
+    toast('打开失败：' + (r && r.error ? r.error : '未知错误'), 'err');
+  }
+}
+
+async function closeWorkspace(docId) {
+  if (!confirm('关闭工作区「' + docId + '」？（仅删除编辑器内的记录，源文件不会受影响）')) return;
+  try {
+    await apiFetch('/workspaces/' + encodeURIComponent(docId), { method: 'DELETE' });
+    toast('工作区已关闭', 'ok');
+    await loadWorkspaces();
+    renderEditor();
+  } catch (e) { toast('关闭失败：' + e.message, 'err'); }
+}
+
+async function scanDirectory(path) {
+  if (!path) return [];
+  try {
+    const r = await apiFetch('/workspaces/scan', { method: 'POST', body: JSON.stringify({ path }) });
+    return r && r.files ? r.files : [];
+  } catch (e) { return []; }
+}
+
+let wsBrowsePath = '';
+let wsFileCache = {}; // docId -> files[]
+
+async function openWorkspaceModal() {
+  const savedPath = localStorage.getItem('ve_last_workspace_path') || '';
+  let browseHtml = '<div class="text-secondary small mb-2">输入本地文件夹路径，将作为 Git 工作区打开：</div>' +
+    '<div class="input-group mb-3">' +
+      '<input class="form-control form-control-sm" id="wsPathInput" value="' + esc(savedPath) + '" placeholder="例如：D:/Projects/my-docs">' +
+    '</div>';
+  // 显示目录内文件预览
+  browseHtml += '<div id="wsScanResult" class="small text-secondary">输入路径后点击预览</div>';
+
+  showModal('打开工作区',
+    browseHtml,
+    '<button class="btn btn-sm btn-outline-secondary me-2" onclick="browseWsFolder()">浏览文件夹</button>' +
+    '<button class="btn btn-sm btn-primary" onclick="confirmOpenWorkspace()">打开</button>');
+
+  // 路径输入框实时预览（防抖）
+  const inp = document.getElementById('wsPathInput');
+  if (inp) {
+    let timer = null;
+    inp.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const p = inp.value.trim();
+        localStorage.setItem('ve_last_workspace_path', p);
+        wsBrowsePath = p;
+        const el = document.getElementById('wsScanResult');
+        if (!p) { if (el) el.textContent = '输入路径后点击预览'; return; }
+        if (el) el.textContent = '扫描中…';
+        const files = await scanDirectory(p);
+        if (el) {
+          if (files.length === 0) el.textContent = '该目录为空或无法访问';
+          else el.innerHTML = '<div class="text-success mb-1"><i class="bi bi-check-circle me-1"></i>找到 ' + files.length + ' 个文件</div>' +
+            files.slice(0, 20).map(f => '<div class="text-secondary small ps-2">' + esc(f.path) + '</div>').join('') +
+            (files.length > 20 ? '<div class="text-secondary small">… 还有 ' + (files.length - 20) + ' 个文件</div>' : '');
+        }
+      }, 400);
+    });
+  }
+}
+
+async function browseWsFolder() {
+  // 用路径输入框手动输入，这里提示用户输入
+  const inp = document.getElementById('wsPathInput');
+  if (inp) inp.focus();
+}
+
+async function confirmOpenWorkspace() {
+  const inp = document.getElementById('wsPathInput');
+  const path = inp ? inp.value.trim() : '';
+  closeModal();
+  await openWorkspace(path);
+}
+
+async function selectWorkspace(docId) {
+  editor.activeDocId = docId;
+  editor.activeFilePath = '';
+  editor.content = '';
+  editor.unsaved = false;
+  await loadGitData();
+  // 缓存工作区文件列表
+  if (!wsFileCache[docId]) {
+    try {
+      wsFileCache[docId] = (await apiFetch('/files/' + docId)) || [];
+    } catch (e) { wsFileCache[docId] = []; }
+  }
+  renderEditor();
+}
+
 // 从服务器拉取最新文档列表，有变化时自动刷新侧边栏（其他设备删除/新增也会同步显示）
 async function refreshSidebar() {
   if (!auth.isLoggedIn || location.hash !== '#/editor') return;
@@ -278,9 +470,18 @@ async function refreshSidebar() {
   try { data = await apiFetch('/docs'); } catch (e) { return; }
   if (!data) return;
   const j = JSON.stringify(data);
-  if (j === lastDocsJson) return;
+  if (j === lastDocsJson) {
+    // 仅刷新工作区（docs 无变化时仍更新 workspace 列表）
+    await loadWorkspaces();
+    return;
+  }
   sidebarDocs = data;
   lastDocsJson = j;
+  // 清空已删除工作区的缓存
+  wsFileCache = {};
+  for (const ws of workspaces) {
+    try { wsFileCache[ws.id] = (await apiFetch('/files/' + ws.id)) || []; } catch (e) {}
+  }
   // 当前正在输入或有弹窗打开时不重绘，避免打断操作
   const ae = document.activeElement;
   const typing = ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT');
@@ -319,6 +520,9 @@ function onEditorChange(val) {
   editor.unsaved = true;
   const pv = document.getElementById('vePreview');
   if (pv) pv.innerHTML = parseMd(val);
+  // 同步高亮层
+  const hl = document.getElementById('veHighlight');
+  if (hl) hl.innerHTML = hlMd(val);
   document.querySelectorAll('.ve-unsaved-dot').forEach(el => el.classList.remove('hidden'));
   const ub = document.getElementById('veUnsavedBar');
   if (ub) ub.classList.remove('hidden');
@@ -441,12 +645,113 @@ async function removeRemote(name) {
 function setPanel(panel) {
   activePanel = panel;
   renderEditor();
-  // <992px 时侧边栏为抽屉，切换面板时自动展开
+  // 移动端点击面板按钮时自动展开侧边栏
   if (window.innerWidth < 992) {
     const el = document.getElementById('veSidebar');
-    if (el) (bootstrap.Offcanvas.getInstance(el) || new bootstrap.Offcanvas(el)).show();
+    if (el && !el.classList.contains('show')) {
+      el.classList.add('show');
+      const bp = document.createElement('div');
+      bp.className = 'offcanvas-backdrop fade';
+      document.body.appendChild(bp);
+      requestAnimationFrame(() => bp.classList.add('show'));
+      document.body.classList.add('modal-open');
+    }
   }
 }
+
+// 用事件委托管理 offcanvas，避免 DOM 重建后 Bootstrap 实例失效
+function initOffcanvasDelegate() {
+  // 关闭按钮：移除 show 类，隐藏 backdrop
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#veSidebarClose')) return;
+    const el = document.getElementById('veSidebar');
+    if (el) {
+      el.classList.remove('show');
+      document.querySelector('.offcanvas-backdrop')?.remove();
+      document.body.classList.remove('modal-open');
+    }
+  });
+  // 触发按钮：手动控制开/关
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#veSidebarToggler')) return;
+    e.preventDefault();
+    const el = document.getElementById('veSidebar');
+    if (!el) return;
+    if (el.classList.contains('show')) {
+      el.classList.remove('show');
+      document.querySelector('.offcanvas-backdrop')?.remove();
+      document.body.classList.remove('modal-open');
+    } else {
+      el.classList.add('show');
+      const bp = document.createElement('div');
+      bp.className = 'offcanvas-backdrop fade';
+      document.body.appendChild(bp);
+      requestAnimationFrame(() => bp.classList.add('show'));
+      document.body.classList.add('modal-open');
+    }
+  });
+}
+// 页面加载后只初始化一次
+initOffcanvasDelegate();
+
+// 菜单 offcanvas（编辑器和设置页共用同一套开/关逻辑）
+function closeMenuOffcanvas() {
+  ['veMenuOffcanvas', 'veSettingsMenuOffcanvas'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('show');
+  });
+  document.querySelector('.offcanvas-backdrop')?.remove();
+  document.body.classList.remove('modal-open');
+}
+
+document.addEventListener('click', e => {
+  // 编辑器页菜单触发 / 关闭
+  if (e.target.closest('#veMenuToggler')) {
+    e.preventDefault();
+    const el = document.getElementById('veMenuOffcanvas');
+    if (!el) return;
+    if (el.classList.contains('show')) {
+      el.classList.remove('show');
+      document.querySelector('.offcanvas-backdrop')?.remove();
+      document.body.classList.remove('modal-open');
+    } else {
+      el.classList.add('show');
+      const bp = document.createElement('div');
+      bp.className = 'offcanvas-backdrop fade';
+      document.body.appendChild(bp);
+      requestAnimationFrame(() => bp.classList.add('show'));
+      document.body.classList.add('modal-open');
+    }
+    return;
+  }
+  if (e.target.closest('#veMenuClose')) {
+    closeMenuOffcanvas();
+    return;
+  }
+  // 设置页菜单触发 / 关闭
+  if (e.target.closest('#veSettingsToggler')) {
+    e.preventDefault();
+    const el = document.getElementById('veSettingsMenuOffcanvas');
+    if (!el) return;
+    if (el.classList.contains('show')) {
+      el.classList.remove('show');
+      document.querySelector('.offcanvas-backdrop')?.remove();
+      document.body.classList.remove('modal-open');
+    } else {
+      el.classList.add('show');
+      const bp = document.createElement('div');
+      bp.className = 'offcanvas-backdrop fade';
+      document.body.appendChild(bp);
+      requestAnimationFrame(() => bp.classList.add('show'));
+      document.body.classList.add('modal-open');
+    }
+    return;
+  }
+  if (e.target.closest('#veSettingsMenuClose')) {
+    closeMenuOffcanvas();
+    return;
+  }
+});
 
 function toggleDoc(docId) {
   expandedDocs[docId] = !expandedDocs[docId];
@@ -762,6 +1067,38 @@ function onFontSizeChange(val) {
   document.documentElement.style.setProperty('--ed-font-size', fontSize + 'px');
 }
 
+function toggleMobilePreview() {
+  mobilePreviewMode = !mobilePreviewMode;
+  localStorage.setItem('ve_mobile_preview', mobilePreviewMode ? '1' : '0');
+  applyMobilePreviewState();
+}
+
+function applyMobilePreviewState() {
+  const ep = document.getElementById('veEditorPane');
+  const pr = document.getElementById('vePreview');
+  const btn = document.getElementById('vePreviewToggle');
+  if (!ep || !pr) return;
+  if (window.innerWidth < 768) {
+    if (mobilePreviewMode) {
+      ep.classList.add('hidden');
+      pr.classList.remove('hidden');
+      pr.style.flex = '1 1 100%';
+      pr.innerHTML = parseMd(editor.content || '');
+    } else {
+      ep.classList.remove('hidden');
+      pr.classList.add('hidden');
+      pr.style.flex = '';
+    }
+    if (btn) {
+      btn.innerHTML = '<i class="bi bi-' + (mobilePreviewMode ? 'pencil' : 'eye') + '"></i>' + (mobilePreviewMode ? ' 编辑' : ' 预览');
+    }
+  } else {
+    ep.classList.remove('hidden');
+    pr.classList.remove('hidden');
+    pr.style.flex = '';
+  }
+}
+
 // ── Editor page ──────────────────────────────────────────────
 function renderEditor() {
   const app = document.getElementById('app');
@@ -773,10 +1110,35 @@ function renderEditor() {
       '<span>' +
         '<button class="btn btn-sm btn-outline-secondary me-1" title="新建文件" onclick="createFile()"><i class="bi bi-file-earmark-plus"></i></button>' +
         '<button class="btn btn-sm btn-outline-secondary me-1" title="新建文件夹" onclick="createFolder()"><i class="bi bi-folder-plus"></i></button>' +
+        '<button class="btn btn-sm btn-outline-info me-1" title="打开工作区" onclick="openWorkspaceModal()"><i class="bi bi-folder-open"></i></button>' +
         (editor.activeDocId ? '<button class="btn btn-sm btn-outline-danger" title="删除当前文档" onclick="deleteDoc(editor.activeDocId)"><i class="bi bi-trash3"></i></button>' : '') +
       '</span>' +
     '</div>' +
     '<div class="ve-scroll py-1">' +
+      // 工作区列表
+       (workspaces.length > 0 ?
+         '<div class="px-3 py-2 border-bottom border-secondary-subtle">' +
+           '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">工作区</span>' +
+         '</div>' +
+         workspaces.map(ws => {
+           const wsFiles = wsFileCache[ws.id] || [];
+           const isActive = editor.activeDocId === ws.id;
+           return '<div>' +
+             '<div class="ve-tree-item' + (isActive ? ' on' : '') + '" onclick="selectWorkspace(\'' + esc(ws.id) + '\')">' +
+               '<i class="bi bi-folder2-open"></i>' +
+               '<span class="nm" title="' + esc(ws.source_path || '') + '">' + esc(ws.name) + '</span>' +
+               '<span class="text-secondary small">' + wsFiles.length + '</span>' +
+               '<button class="btn btn-sm py-0 text-secondary" style="font-size:11px;margin-left:2px" onclick="event.stopPropagation();closeWorkspace(\'' + esc(ws.id) + '\')" title="关闭工作区"><i class="bi bi-x"></i></button>' +
+             '</div>' +
+             (isActive && wsFiles.length > 0 ? wsFiles.map(f =>
+               '<div class="ve-tree-item ps-4' + (editor.activeFilePath === f.path ? ' on' : '') + '" onclick="openFile(\'' + esc(ws.id) + '\',\'' + esc(f.path) + '\')">' +
+                 '<i class="bi ' + (f.path.endsWith('.md') ? 'bi-file-earmark-text' : 'bi-file-earmark') + '"></i>' +
+                 '<span class="nm">' + esc(f.path.split('/').pop()) + '</span>' +
+               '</div>').join('') : '') +
+           '</div>';
+         }).join('') :
+         '<div class="px-3 py-2 text-secondary small">点击右上角 <i class="bi bi-folder-open"></i> 按钮打开工作区</div>') +
+       (workspaces.length > 0 ? '<hr class="my-1">' : '') +
       (sidebarDocs.length === 0 ?
         '<div class="px-3 py-2 text-secondary small">暂无文档，点击右上角新建</div>' :
         sidebarDocs.map(doc =>
@@ -824,10 +1186,10 @@ function renderEditor() {
     '<nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom border-secondary-subtle px-2 py-1 flex-shrink-0">' +
       '<div class="container-fluid">' +
         '<a class="navbar-brand ve-brand mb-0" href="#/editor"><i class="bi bi-journal-richtext me-1"></i><span class="ve-logo-text">VanillaEditor</span></a>' +
-        '<button class="navbar-toggler border-0 shadow-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#veSidebar" aria-controls="veSidebar" aria-label="打开侧边栏">' +
+        '<button class="navbar-toggler border-0 shadow-none" type="button" id="veSidebarToggler" aria-label="打开侧边栏">' +
           '<i class="bi bi-layout-sidebar"></i>' +
         '</button>' +
-        '<button class="navbar-toggler border-0 shadow-none" type="button" data-bs-toggle="collapse" data-bs-target="#veNav" aria-controls="veNav" aria-label="打开菜单">' +
+        '<button class="navbar-toggler border-0 shadow-none d-lg-none" type="button" id="veMenuToggler" aria-label="打开菜单">' +
           '<i class="bi bi-list"></i>' +
         '</button>' +
         '<div class="collapse navbar-collapse" id="veNav">' +
@@ -871,12 +1233,41 @@ function renderEditor() {
       '</div>' +
     '</nav>' +
 
+    // left-side menu offcanvas (mobile only)
+    '<div class="offcanvas offcanvas-start d-lg-none" tabindex="-1" id="veMenuOffcanvas" aria-labelledby="veMenuOffcanvasLabel">' +
+      '<div class="offcanvas-header border-bottom border-secondary-subtle">' +
+        '<h6 class="offcanvas-title text-uppercase text-secondary" id="veMenuOffcanvasLabel" style="font-size:11px;letter-spacing:1px">菜单</h6>' +
+        '<button type="button" class="btn-close" id="veMenuClose" aria-label="关闭"></button>' +
+      '</div>' +
+      '<div class="offcanvas-body p-0">' +
+        '<ul class="list-unstyled mb-0">' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="menuOpen();closeMenuOffcanvas();return false"><i class="bi bi-folder2-open me-2"></i>打开文档</a></li>' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="menuImport();closeMenuOffcanvas();return false"><i class="bi bi-box-arrow-in-down me-2"></i>导入</a></li>' +
+          '<li><hr class="dropdown-divider my-0"></li>' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="saveNow();closeMenuOffcanvas();return false"><i class="bi bi-save me-2"></i>保存</a></li>' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="menuSaveAs();closeMenuOffcanvas();return false"><i class="bi bi-save2 me-2"></i>另存为</a></li>' +
+          '<li><hr class="dropdown-divider my-0"></li>' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="menuGitConfig();closeMenuOffcanvas();return false"><i class="bi bi-person-vcard me-2"></i>设置 Git 基础信息</a></li>' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="menuRemotes();closeMenuOffcanvas();return false"><i class="bi bi-hdd-network me-2"></i>配置远程仓库</a></li>' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="menuNewBranch();closeMenuOffcanvas();return false"><i class="bi bi-plus-square me-2"></i>添加新分支</a></li>' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="menuSwitchBranch();closeMenuOffcanvas();return false"><i class="bi bi-arrow-left-right me-2"></i>切换分支</a></li>' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="menuMergeBranch();closeMenuOffcanvas();return false"><i class="bi bi-sign-merge-left me-2"></i>合并分支</a></li>' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="menuReset();closeMenuOffcanvas();return false"><i class="bi bi-arrow-counterclockwise me-2"></i>回退版本</a></li>' +
+          '<li><hr class="dropdown-divider my-0"></li>' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#/setting"><i class="bi bi-gear me-2"></i>设置</a></li>' +
+          '<li><hr class="dropdown-divider my-0"></li>' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#/setting"><i class="bi bi-person-badge me-2"></i>用户信息与设置</a></li>' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="logout();closeMenuOffcanvas();return false"><i class="bi bi-box-arrow-right me-2"></i>退出登录</a></li>' +
+        '</ul>' +
+      '</div>' +
+    '</div>' +
+
     '<div class="d-flex flex-grow-1 overflow-hidden">' +
       // sidebar (offcanvas below lg)
       '<aside class="offcanvas-lg offcanvas-start border-end border-secondary-subtle ve-sidebar" tabindex="-1" id="veSidebar" aria-labelledby="veSidebarLabel">' +
         '<div class="offcanvas-header d-lg-none py-1 border-bottom border-secondary-subtle">' +
           '<span class="text-uppercase text-secondary" id="veSidebarLabel" style="font-size:11px">' + (activePanel === 'git' ? 'Git' : '资源管理器') + '</span>' +
-          '<button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="关闭"></button>' +
+          '<button type="button" class="btn-close" id="veSidebarClose" aria-label="关闭"></button>' +
         '</div>' +
         '<div class="offcanvas-body d-flex p-0">' +
           '<div class="ve-abar d-none d-lg-flex">' +
@@ -898,15 +1289,22 @@ function renderEditor() {
               '<i class="bi bi-file-earmark-text"></i>' + esc(fileName) +
               '<span class="ve-unsaved-dot' + (editor.unsaved ? '' : ' hidden') + '" title="未保存"></span>' +
             '</span>' : '<span class="text-secondary small ms-2">未打开文件</span>') +
+          '<span class="ms-auto d-md-none">' +
+            '<button class="btn btn-sm btn-outline-secondary py-0" id="vePreviewToggle" onclick="toggleMobilePreview()" title="切换预览/编辑">' +
+              '<i class="bi bi-' + (mobilePreviewMode ? 'pencil' : 'eye') + '"></i>' +
+              (mobilePreviewMode ? ' 编辑' : ' 预览') +
+            '</button>' +
+          '</span>' +
         '</div>' +
 
-        '<div class="ve-split">' +
-          '<div class="pane d-flex flex-column" id="veEditorPane">' +
-            '<textarea class="ve-editor" id="veEditor" spellcheck="false" placeholder="在此输入 Markdown...">' + esc(editor.content) + '</textarea>' +
-          '</div>' +
-          '<div class="ve-resizer ve-resizer-v d-none d-md-block" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' +
-          '<div class="pane ve-preview" id="vePreview">' + parseMd(editor.content || '') + '</div>' +
-        '</div>' +
+         '<div class="ve-split">' +
+           '<div class="pane d-flex flex-column ve-edp" id="veEditorPane">' +
+             '<pre class="ve-hl" id="veHighlight" aria-hidden="true"></pre>' +
+             '<textarea class="ve-editor" id="veEditor" spellcheck="false" placeholder="在此输入 Markdown...">' + esc(editor.content) + '</textarea>' +
+           '</div>' +
+           '<div class="ve-resizer ve-resizer-v d-none d-md-block" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' +
+           '<div class="pane ve-preview" id="vePreview">' + parseMd(editor.content || '') + '</div>' +
+         '</div>' +
       '</main>' +
     '</div>' +
 
@@ -930,9 +1328,18 @@ function renderEditor() {
       ta.selectionStart = ta.selectionEnd = s + 2;
       onEditorChange(ta.value);
     });
+    // 同步高亮层初始内容
+    const hl = document.getElementById('veHighlight');
+    if (hl) hl.innerHTML = hlMd(ta.value);
+    // 滚动同步
+    const hlEl = hl;
+    ta.addEventListener('scroll', () => {
+      if (hlEl) { hlEl.scrollTop = ta.scrollTop; hlEl.scrollLeft = ta.scrollLeft; }
+    });
   }
   applyLayout();
   initResizers();
+  applyMobilePreviewState();
   if (activePanel === 'git') loadGitData();
 }
 
@@ -953,20 +1360,40 @@ async function renderSetting() {
     '<nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom border-secondary-subtle px-2 py-1 flex-shrink-0">' +
       '<div class="container-fluid">' +
         '<a class="navbar-brand ve-brand mb-0" href="#/editor"><i class="bi bi-journal-richtext me-1"></i><span class="ve-logo-text">VanillaEditor</span></a>' +
-        '<ul class="navbar-nav me-auto">' +
-          '<li class="nav-item"><a class="nav-link" href="#/editor"><i class="bi bi-pencil-square me-1"></i>编辑器</a></li>' +
-          '<li class="nav-item"><a class="nav-link active" href="#/setting"><i class="bi bi-gear me-1"></i>设置</a></li>' +
-        '</ul>' +
-        '<div class="dropdown">' +
-          '<a class="nav-link dropdown-toggle p-0" href="#" data-bs-toggle="dropdown" role="button" aria-expanded="false">' +
-            '<i class="bi bi-person-circle me-1"></i>' + esc(auth.username) +
-          '</a>' +
-          '<ul class="dropdown-menu dropdown-menu-end">' +
-            '<li><a class="dropdown-item" href="#" onclick="logout();return false"><i class="bi bi-box-arrow-right me-2"></i>退出登录</a></li>' +
+        '<button class="navbar-toggler border-0 shadow-none d-lg-none" type="button" id="veSettingsToggler" aria-label="展开菜单">' +
+          '<i class="bi bi-list"></i>' +
+        '</button>' +
+        '<div class="collapse navbar-collapse" id="veSettingsNav">' +
+          '<ul class="navbar-nav me-auto">' +
+            '<li class="nav-item"><a class="nav-link" href="#/editor"><i class="bi bi-pencil-square me-1"></i>编辑器</a></li>' +
+            '<li class="nav-item"><a class="nav-link active" href="#/setting"><i class="bi bi-gear me-1"></i>设置</a></li>' +
           '</ul>' +
+          '<div class="dropdown">' +
+            '<a class="nav-link dropdown-toggle p-0" href="#" data-bs-toggle="dropdown" role="button" aria-expanded="false">' +
+              '<i class="bi bi-person-circle me-1"></i>' + esc(auth.username) +
+            '</a>' +
+            '<ul class="dropdown-menu dropdown-menu-end">' +
+              '<li><a class="dropdown-item" href="#" onclick="logout();return false"><i class="bi bi-box-arrow-right me-2"></i>退出登录</a></li>' +
+            '</ul>' +
+          '</div>' +
         '</div>' +
       '</div>' +
     '</nav>' +
+
+    // left-side menu offcanvas (mobile only)
+    '<div class="offcanvas offcanvas-start d-lg-none" tabindex="-1" id="veSettingsMenuOffcanvas" aria-labelledby="veSettingsMenuOffcanvasLabel">' +
+      '<div class="offcanvas-header border-bottom border-secondary-subtle">' +
+        '<h6 class="offcanvas-title text-uppercase text-secondary" id="veSettingsMenuOffcanvasLabel" style="font-size:11px;letter-spacing:1px">菜单</h6>' +
+        '<button type="button" class="btn-close" id="veSettingsMenuClose" aria-label="关闭"></button>' +
+      '</div>' +
+      '<div class="offcanvas-body p-0">' +
+        '<ul class="list-unstyled mb-0">' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#/editor"><i class="bi bi-pencil-square me-2"></i>编辑器</a></li>' +
+          '<li><hr class="dropdown-divider my-0"></li>' +
+          '<li><a class="dropdown-item d-block py-3 px-4 text-body" href="#" onclick="logout()"><i class="bi bi-box-arrow-right me-2"></i>退出登录</a></li>' +
+        '</ul>' +
+      '</div>' +
+    '</div>' +
 
     '<div class="container-fluid py-4 overflow-auto flex-grow-1">' +
       '<div class="row justify-content-center g-3">' +
@@ -1050,7 +1477,7 @@ Router.register('#/login', () => {
 Router.register('#/editor', async () => {
   if (!auth.isLoggedIn) { Router.go('#/login'); return; }
   renderEditor();
-  await loadFiles();
+  await Promise.all([loadFiles(), loadWorkspaces()]);
   if (editor.activeFilePath) renderEditor();
 });
 Router.register('#/setting', async () => {
@@ -1061,3 +1488,7 @@ Router.register('#/setting', async () => {
 // ── Init ─────────────────────────────────────────────────────
 if (!location.hash) location.hash = auth.isLoggedIn ? '#/editor' : '#/login';
 Router.render();
+
+window.addEventListener('resize', () => {
+  if (location.hash === '#/editor') applyMobilePreviewState();
+});
