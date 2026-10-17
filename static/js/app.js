@@ -1483,25 +1483,17 @@ async function renderSetting() {
             '<button class="btn btn-outline-danger w-100" onclick="logout()"><i class="bi bi-box-arrow-right me-1"></i>退出登录</button>' +
           '</div>' +
         '</div>';
-      case 'network':
-        return '<div class="card h-100">' +
-          '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-shield-lock me-1"></i>远程访问控制</div>' +
-          '<div class="card-body">' +
-            '<p class="text-secondary small">远程控制功能开发中，敬请期待。</p>' +
-          '</div>' +
-          '<div class="card-header bg-transparent border-secondary-subtle mt-3"><i class="bi bi-hdd-network me-1"></i>同步远端设备</div>' +
-          '<div class="card-body">' +
-            '<p class="text-secondary small mb-2">将其他设备的 VE 地址添加为 Git 远端，即可端到端同步。当前作用文档：' +
-              (editor.activeDocId ? '<span class="badge text-bg-secondary ms-1">' + esc(editor.activeDocId) + '</span>' : '<span class="text-warning ms-1">未选择</span>') +
-            '</p>' +
-            '<div class="input-group mb-3">' +
-              '<input id="newRemoteUrl" class="form-control" placeholder="http://192.168.1.x:5000">' +
-              '<button class="btn btn-primary" onclick="addRemote()"><i class="bi bi-plus-lg"></i></button>' +
-            '</div>' +
-            ((function() { var r = []; try { if (editor.activeDocId) { var x = apiFetch('/sync/remote', {method:'POST',body:JSON.stringify({doc_id:editor.activeDocId})}); x.then(function(d){r=d||[];}); } } catch(e){} return r; })()) || [] ).length === 0 ?
-              '<div class="text-secondary small">暂无远端设备</div>' : '') +
-          '</div>' +
-        '</div>';
+       case 'network':
+         return '<div class="card h-100">' +
+           '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-shield-lock me-1"></i>远程访问控制</div>' +
+           '<div class="card-body">' +
+             '<p class="text-secondary small">远程控制功能开发中，敬请期待。</p>' +
+           '</div>' +
+           '<div class="card-header bg-transparent border-secondary-subtle mt-3"><i class="bi bi-hdd-network me-1"></i>同步远端设备</div>' +
+           '<div class="card-body" id="veRemoteListBody">' +
+             '<p class="text-secondary small">加载中…</p>' +
+           '</div>' +
+         '</div>';
       case 'version':
         return '<div class="card h-100">' +
           '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-git me-1"></i>Git 版本管理</div>' +
@@ -1757,8 +1749,17 @@ Router.register('#/setting', async () => {
 });
 
 // ── Init ─────────────────────────────────────────────────────
-if (!location.hash) location.hash = auth.isLoggedIn ? '#/editor' : '#/login';
-Router.render();
+window.addEventListener('error', e => {
+  console.error('[VE Error]', e.message, e.filename, e.lineno);
+});
+try {
+  if (!location.hash) location.hash = auth.isLoggedIn ? '#/editor' : '#/login';
+  Router.render();
+  console.log('[VE] Router rendered, hash:', location.hash);
+} catch (e) {
+  console.error('[VE Init Error]', e);
+  document.getElementById('app').innerHTML = '<div class="p-4 text-danger">初始化错误：' + e.message + '</div>';
+}
 
 window.addEventListener('resize', () => {
   if (location.hash === '#/editor') applyMobilePreviewState();
