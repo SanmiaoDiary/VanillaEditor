@@ -244,25 +244,20 @@ function renderHighlight(content) {
 
 function togglePreview() {
   previewVisible = !previewVisible;
-  if (window.innerWidth < 768) return; // 移动端走 applyMobilePreviewState
-  const split = document.querySelector('.ve-split');
-  if (!split) return;
-  const existing = document.getElementById('vePreview');
-  if (previewVisible) {
-    // 重建预览 pane 并插入到 resizer 之后
-    const pr = document.createElement('div');
-    pr.className = 'pane ve-preview';
-    pr.id = 'vePreview';
-    pr.innerHTML = '<div class="ve-scroll">' + parseMd(editor.content || '') + '</div>';
-    const resizer = document.getElementById('veSplitResizer');
-    if (resizer) resizer.after(pr);
-    else split.appendChild(pr);
-  } else {
-    // 从 DOM 中移除预览 pane，编辑区自动占满宽度
-    if (existing) existing.remove();
-  }
+  // 桌面端：切换预览面板显示/隐藏（仅改 class，不做 DOM 增删）
+  const pr = document.getElementById('vePreview');
   const btn = document.getElementById('vePreviewToggleDesktop');
-  if (btn) btn.innerHTML = '<i class="bi bi-' + (previewVisible ? 'eye-slash' : 'eye') + '"></i>';
+  if (pr) {
+    if (previewVisible) {
+      pr.classList.remove('d-none');
+      pr.style.display = '';
+      if (btn) btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+    } else {
+      pr.classList.add('d-none');
+      pr.style.display = 'none';
+      if (btn) btn.innerHTML = '<i class="bi bi-eye"></i>';
+    }
+  }
 }
 
 // ── Clock (只更新文本，避免整页重绘) ──────────────────────────
@@ -1221,22 +1216,8 @@ function applyMobilePreviewState() {
       btn.innerHTML = '<i class="bi bi-' + (mobilePreviewMode ? 'pencil' : 'eye') + '"></i>' + (mobilePreviewMode ? ' 编辑' : ' 预览');
     }
   } else {
-    // 桌面端：尊重 previewVisible 状态
+    // 桌面端：始终重建 HTML，由 previewVisible 决定预览是否显示
     ep.classList.remove('d-none');
-    if (previewVisible) {
-      if (!document.getElementById('vePreview')) {
-        const split = document.querySelector('.ve-split');
-        const resizer = document.getElementById('veSplitResizer');
-        const pr = document.createElement('div');
-        pr.className = 'pane ve-preview';
-        pr.id = 'vePreview';
-        pr.innerHTML = '<div class="ve-scroll">' + parseMd(editor.content || '') + '</div>';
-        (resizer || split).appendChild(pr);
-      }
-    } else {
-      const existing = document.getElementById('vePreview');
-      if (existing) existing.remove();
-    }
   }
 }
 
@@ -1460,7 +1441,7 @@ function renderEditor() {
               '</div>' +
             '</div>' +
             '<div class="ve-resizer ve-resizer-v d-none d-md-block" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' +
-            (previewVisible ? '<div class="pane ve-preview" id="vePreview"><div class="ve-scroll">' + parseMd(editor.content || '') + '</div></div>' : '') +
+            '<div class="pane ve-preview' + (previewVisible ? '' : ' d-none') + '" id="vePreview"><div class="ve-scroll">' + parseMd(editor.content || '') + '</div></div>' +
           '</div>' +
       '</main>' +
     '</div>' +
