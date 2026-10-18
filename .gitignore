@@ -8,3 +8,5 @@ data/
 *.log
 .vscode/settings.json
 .venv/
+_debug*
+_test_*.html

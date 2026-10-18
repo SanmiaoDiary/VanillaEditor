@@ -36,6 +36,10 @@ let loginError = '';
 let saveTimer = null;
 let fontSize = parseInt(localStorage.getItem('ve_font_size') || '14', 10);
 let mobilePreviewMode = localStorage.getItem('ve_mobile_preview') === '1';
+let previewVisible = false; // 桌面端预览默认折叠
+// 已打开的标签页
+let openTabs = [];
+let activeTabId = null;
 document.documentElement.style.setProperty('--ed-font-size', fontSize + 'px');
 
 // ── API ──────────────────────────────────────────────────────
@@ -188,6 +192,10 @@ function esc(s) {
 }
 
 // ── Markdown syntax highlighter ──────────────────────────────
+// 行内语法着色：把 #、**、*、-、> 等标记字符单独包裹 <span class="hl-mk"> 蓝色高亮，
+// ── Markdown syntax highlighter ──────────────────────────────
+// 输出 <pre> 内容：每行用 \n 分隔，行内语法标记用 <span> 着色。
+// <pre> 与 textarea 共享相同字体/行高/内边距，光标位置天然对齐。
 function hlMd(src) {
   if (!src) return '';
   const escH = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -205,69 +213,49 @@ function hlMd(src) {
     s = s.replace(/\x00(\d+)\x00/g, (m, i) => '<code>' + escH(codes[+i]) + '</code>');
     return s;
   };
-
-  const listRe = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
   const lines = src.replace(/\r\n?/g, '\n').split('\n');
-  let html = '', i = 0;
+  return lines.map(line => {
+    const esc = escH(line);
+    // 行首 # 标题标记
+    const hm = esc.match(/^(#{1,6}\s)(.*)$/);
+    if (hm) return '<span class="hl-mk">' + hm[1] + '</span>' + inl(hm[2]);
+    // 行首 > 引用标记
+    const bq = esc.match(/^(&gt;\s?)(.*)$/);
+    if (bq) return '<span class="hl-mk">' + bq[1] + '</span>' + inl(bq[2]);
+    // 行首 - * + 列表或数字. 列表
+    const lm = esc.match(/^(\s*[-*+] |\s*\d+\.)\s+(.*)$/);
+    if (lm) return '<span class="hl-mk">' + lm[1] + '</span>' + inl(lm[2]);
+    return inl(esc);
+  }).join('\n');
+}
 
-  const renderList = (items, idx, indent) => {
-    const tag = items[idx].ordered ? 'ol' : 'ul';
-    let h = '<' + tag + '>', j = idx;
-    while (j < items.length && items[j].indent >= indent) {
-      const it = items[j];
-      if (it.indent > indent) {
-        const sub = renderList(items, j, it.indent);
-        h += sub.html; j = sub.next; continue;
-      }
-      h += '<li>' + inl(escH(it.text)) + '</li>';
-      j++;
-    }
-    return { html: h + '</' + tag + '>', next: j };
-  };
+// 渲染高亮层 + 行号
+function renderHighlight(content) {
+  const hlEl = document.getElementById('veHighlight');
+  const lnEl = document.getElementById('veLnNums');
+  if (!hlEl || !lnEl) return;
+  const lines = (content || '').replace(/\r\n?/g, '\n').split('\n');
+  hlEl.innerHTML = hlMd(content);
+  const totalLines = Math.max(lines.length, 1);
+  let lnHtml = '';
+  for (let i = 1; i <= totalLines; i++) lnHtml += i + '\n';
+  lnEl.textContent = lnHtml;
+}
 
-  while (i < lines.length) {
-    const line = lines[i];
-
-    const fence = line.match(/^```(\S*)\s*$/);
-    if (fence) {
-      const buf = []; i++;
-      while (i < lines.length && !/^```\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
-      i++;
-      html += '<pre><code>' + escH(buf.join('\n')) + '</code></pre>';
-      continue;
-    }
-    if (/^\s*$/.test(line)) { i++; continue; }
-
-    const h = line.match(/^(#{1,6})\s+(.*)$/);
-    if (h) { html += '<' + 'h' + h[1].length + ' class="hl-h' + h[1].length + '">' + inl(escH(h[2])) + '</h' + h[1].length + '>'; i++; continue; }
-
-    if (/^\s*([-*_])\s*(\1\s*){2,}$/.test(line)) { html += '<hr class="hl-hr">'; i++; continue; }
-
-    if (/^\s*>/.test(line)) {
-      const buf = [];
-      while (i < lines.length && /^\s*>/.test(lines[i])) { buf.push(lines[i].replace(/^\s*>\s?/, '')); i++; }
-      html += '<blockquote class="hl-bq">' + hlMd(buf.join('\n')) + '</blockquote>';
-      continue;
-    }
-
-    const lm = line.match(listRe);
-    if (lm) {
-      const items = [];
-      while (i < lines.length) {
-        const m = lines[i].match(listRe);
-        if (!m) break;
-        items.push({ indent: m[1].length, ordered: /^\d/.test(m[2]), text: m[3] });
-        i++;
-      }
-      html += renderList(items, 0, items[0].indent).html;
-      continue;
-    }
-
-    const buf2 = [line]; i++;
-    while (i < lines.length && (!/^\s*$/.test(lines[i]) && !/^(#{1,6})\s+/.test(lines[i]) && !/^```/.test(lines[i]) && !/^\s*>/.test(lines[i]) && !listRe.test(lines[i]) && !/^\s*([-*_])\s*(\1\s*){2,}$/.test(lines[i]))) { buf2.push(lines[i]); i++; }
-    html += '<p>' + inl(escH(buf2.join('\n'))) + '</p>';
+function togglePreview() {
+  previewVisible = !previewVisible;
+  const pr = document.getElementById('vePreview');
+  const btn = document.getElementById('vePreviewToggleDesktop');
+  if (!pr) return;
+  if (previewVisible) {
+    pr.classList.remove('d-none');
+    pr.style.display = '';
+    if (btn) btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+  } else {
+    pr.classList.add('d-none');
+    pr.style.display = '';
+    if (btn) btn.innerHTML = '<i class="bi bi-eye"></i>';
   }
-  return html;
 }
 
 // ── Clock (只更新文本，避免整页重绘) ──────────────────────────
@@ -622,35 +610,52 @@ async function openFile(docId, filePath) {
     editor.fileSha = r.sha;
     editor.unsaved = false;
   }
+  // 将文件加入标签页列表（如已存在则移到最前）
+  const tabId = docId + '::' + filePath;
+  openTabs = openTabs.filter(t => t.id !== tabId);
+  openTabs.unshift({ id: tabId, docId, filePath, label: filePath.split('/').pop(), unsaved: false });
+  activeTabId = tabId;
   if (location.hash !== '#/editor') { Router.go('#/editor'); return; }
   renderEditor();
 }
 
-function onEditorChange(val) {
-  editor.content = val;
-  editor.unsaved = true;
-  const pv = document.getElementById('vePreview');
-  if (pv) pv.innerHTML = parseMd(val);
-  // 同步高亮层
-  const hl = document.getElementById('veHighlight');
-  if (hl) hl.innerHTML = hlMd(val);
-  document.querySelectorAll('.ve-unsaved-dot').forEach(el => el.classList.remove('hidden'));
-  const ub = document.getElementById('veUnsavedBar');
-  if (ub) ub.classList.remove('hidden');
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    if (!editor.activeDocId || !editor.activeFilePath) return;
-    const r = await apiFetch('/files/' + editor.activeDocId + '/' + encodeURIComponent(editor.activeFilePath), {
-      method: 'PUT', body: JSON.stringify({ content: val })
-    });
-    if (r) {
+function closeTab(tabId) {
+  const idx = openTabs.findIndex(t => t.id === tabId);
+  if (idx === -1) return;
+  const wasActive = tabId === activeTabId;
+  openTabs.splice(idx, 1);
+  if (wasActive) {
+    if (openTabs.length > 0) {
+      activeTabId = openTabs[0].id;
+      const t = openTabs[0];
+      editor.activeDocId = t.docId;
+      editor.activeFilePath = t.filePath;
+      editor.content = t.content || '';
       editor.unsaved = false;
-      document.querySelectorAll('.ve-unsaved-dot').forEach(el => el.classList.add('hidden'));
-      const ub = document.getElementById('veUnsavedBar');
-      if (ub) ub.classList.add('hidden');
-      toast('已保存', 'ok');
+    } else {
+      editor.activeDocId = '';
+      editor.activeFilePath = '';
+      editor.content = '';
+      editor.unsaved = false;
     }
-  }, 1500);
+  }
+  renderEditor();
+}
+
+function switchTab(tabId) {
+  if (tabId === activeTabId) return;
+  // 切换前先保存当前标签的内容
+  const cur = openTabs.find(t => t.id === activeTabId);
+  if (cur) cur.content = editor.content;
+  const idx = openTabs.findIndex(t => t.id === tabId);
+  if (idx === -1) return;
+  activeTabId = tabId;
+  const t = openTabs[idx];
+  editor.activeDocId = t.docId;
+  editor.activeFilePath = t.filePath;
+  editor.content = t.content || '';
+  editor.unsaved = t.unsaved;
+  renderEditor();
 }
 
 async function createFolder() {
@@ -691,6 +696,8 @@ async function deleteDoc(docId) {
     return;
   }
   delete expandedDocs[docId];
+  // 移除相关标签页
+  openTabs = openTabs.filter(t => t.docId !== docId);
   if (editor.activeDocId === docId) {
     editor.activeDocId = ''; editor.activeFilePath = ''; editor.content = ''; editor.unsaved = false;
   }
@@ -943,9 +950,9 @@ async function saveNow() {
   });
   if (r) {
     editor.unsaved = false;
-    document.querySelectorAll('.ve-unsaved-dot').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.ve-unsaved-dot').forEach(el => el.classList.add('d-none'));
     const ub = document.getElementById('veUnsavedBar');
-    if (ub) ub.classList.add('hidden');
+    if (ub) ub.classList.add('d-none');
     toast('已保存', 'ok');
   }
 }
@@ -1179,6 +1186,7 @@ function onFontSizeChange(val) {
 }
 
 function toggleMobilePreview() {
+  if (window.innerWidth >= 768) return;
   mobilePreviewMode = !mobilePreviewMode;
   localStorage.setItem('ve_mobile_preview', mobilePreviewMode ? '1' : '0');
   applyMobilePreviewState();
@@ -1191,22 +1199,30 @@ function applyMobilePreviewState() {
   if (!ep || !pr) return;
   if (window.innerWidth < 768) {
     if (mobilePreviewMode) {
-      ep.classList.add('hidden');
-      pr.classList.remove('hidden');
-      pr.style.flex = '1 1 100%';
-      pr.innerHTML = parseMd(editor.content || '');
+      ep.classList.add('d-none');
+      pr.classList.remove('d-none');
+      pr.style.display = '';
+      const scrollEl = pr.querySelector('.ve-scroll');
+      if (scrollEl) scrollEl.innerHTML = parseMd(editor.content || '');
+      else pr.innerHTML = '<div class="ve-scroll">' + parseMd(editor.content || '') + '</div>';
     } else {
-      ep.classList.remove('hidden');
-      pr.classList.add('hidden');
-      pr.style.flex = '';
+      ep.classList.remove('d-none');
+      pr.classList.add('d-none');
+      pr.style.display = '';
     }
     if (btn) {
       btn.innerHTML = '<i class="bi bi-' + (mobilePreviewMode ? 'pencil' : 'eye') + '"></i>' + (mobilePreviewMode ? ' 编辑' : ' 预览');
     }
   } else {
-    ep.classList.remove('hidden');
-    pr.classList.remove('hidden');
-    pr.style.flex = '';
+    // 桌面端：尊重 previewVisible 状态
+    ep.classList.remove('d-none');
+    if (previewVisible) {
+      pr.classList.remove('d-none');
+      pr.style.display = '';
+    } else {
+      pr.classList.add('d-none');
+      pr.style.display = '';
+    }
   }
 }
 
@@ -1221,7 +1237,7 @@ function renderEditor() {
       '<span>' +
         '<button class="btn btn-sm btn-outline-secondary me-1" title="新建文件" onclick="createFile()"><i class="bi bi-file-earmark-plus"></i></button>' +
         '<button class="btn btn-sm btn-outline-secondary me-1" title="新建文件夹" onclick="createFolder()"><i class="bi bi-folder-plus"></i></button>' +
-        '<button class="btn btn-sm btn-outline-secondary me-1" title="打开工作区" onclick="openWorkspaceModal()"><i class="bi bi-folder-open"></i></button>' +
+        '<button class="btn btn-sm btn-outline-secondary me-1" title="更换工作区" onclick="openWorkspaceModal()"><i class="bi bi-folder-symlink"></i></button>' +
         (editor.activeDocId ? '<button class="btn btn-sm btn-outline-danger" title="删除当前文档" onclick="deleteDoc(editor.activeDocId)"><i class="bi bi-trash3"></i></button>' : '') +
       '</span>' +
     '</div>' +
@@ -1392,26 +1408,45 @@ function renderEditor() {
         '<div class="d-flex align-items-center gap-2 px-3 py-1 bg-body-tertiary border-bottom border-secondary-subtle flex-shrink-0">' +
           '<button class="btn btn-sm btn-outline-secondary py-0 d-lg-none" onclick="setPanel(\'files\')" title="文件列表"><i class="bi bi-list"></i></button>' +
           '<button class="btn btn-sm btn-outline-secondary py-0 d-lg-none" onclick="setPanel(\'git\')" title="Git 面板"><i class="bi bi-git"></i></button>' +
-          (fileName ?
-            '<span class="d-flex align-items-center gap-2 ms-2 px-2 py-1 rounded bg-body border border-secondary-subtle small">' +
-              '<i class="bi bi-file-earmark-text"></i>' + esc(fileName) +
-              '<span class="ve-unsaved-dot' + (editor.unsaved ? '' : ' hidden') + '" title="未保存"></span>' +
-            '</span>' : '<span class="text-secondary small ms-2">未打开文件</span>') +
-          '<span class="ms-auto d-md-none">' +
-            '<button class="btn btn-sm btn-outline-secondary py-0" id="vePreviewToggle" onclick="toggleMobilePreview()" title="切换预览/编辑">' +
+          '<span class="ms-auto">' +
+            '<button class="btn btn-sm btn-outline-secondary py-0 d-md-none" id="vePreviewToggle" onclick="toggleMobilePreview()" title="切换预览/编辑">' +
               '<i class="bi bi-' + (mobilePreviewMode ? 'pencil' : 'eye') + '"></i>' +
               (mobilePreviewMode ? ' 编辑' : ' 预览') +
             '</button>' +
+            '<button class="btn btn-sm btn-outline-secondary py-0 d-none d-md-inline-flex" id="vePreviewToggleDesktop" onclick="togglePreview()" title="切换预览">' +
+              '<i class="bi bi-eye"></i>' +
+            '</button>' +
           '</span>' +
+        '</div>' +
+        // 标签栏
+        '<div class="d-flex align-items-end border-bottom flex-shrink-0 ve-tabs" style="overflow-x:auto;background:var(--bs-body-bg)">' +
+          (openTabs.length === 0 ?
+            '<div class="text-secondary small px-2 py-1">未打开文件</div>' :
+            openTabs.map(t => {
+              const isActive = t.id === activeTabId;
+              const label = esc(t.label);
+              return '<div class="d-flex align-items-center gap-1 px-2 py-1 small ve-tab border-end border-secondary-subtle" style="cursor:pointer;white-space:nowrap;min-width:80px;max-width:200px;border-bottom:2px solid ' + (isActive ? 'var(--ve-accent)' : 'transparent') + ';background:' + (isActive ? 'var(--bs-body-bg)' : 'transparent') + '" onclick="switchTab(\'' + esc(t.id) + '\')">' +
+                '<i class="bi bi-file-earmark-text text-secondary" style="font-size:11px"></i>' +
+                '<span class="flex-grow-1 text-truncate' + (isActive ? '' : ' text-secondary') + '">' + label + '</span>' +
+                '<span class="ve-unsaved-dot' + (t.unsaved ? '' : ' d-none') + '" title="未保存"></span>' +
+                '<span class="ve-tab-close" onclick="event.stopPropagation();closeTab(\'' + esc(t.id) + '\')"><i class="bi bi-x"></i></span>' +
+              '</div>';
+            }).join('')
+          ) +
         '</div>' +
 
          '<div class="ve-split">' +
-           '<div class="pane d-flex flex-column ve-edp" id="veEditorPane">' +
-             '<pre class="ve-hl" id="veHighlight" aria-hidden="true"></pre>' +
-             '<textarea class="ve-editor" id="veEditor" spellcheck="false" placeholder="在此输入 Markdown...">' + esc(editor.content) + '</textarea>' +
-           '</div>' +
+          '<div class="pane d-flex flex-column ve-edp" id="veEditorPane">' +
+            '<div class="ve-editor-area">' +
+              '<div class="ve-lngutter"><div class="ve-lngutter-inner" id="veLnNums"></div></div>' +
+              '<div class="ve-editor-scroll">' +
+                '<pre class="ve-hl" id="veHighlight" aria-hidden="true"></pre>' +
+                '<textarea class="ve-editor" id="veEditor" spellcheck="false" placeholder="在此输入 Markdown..."></textarea>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
            '<div class="ve-resizer ve-resizer-v d-none d-md-block" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' +
-           '<div class="pane ve-preview" id="vePreview">' + parseMd(editor.content || '') + '</div>' +
+           '<div class="pane ve-preview" id="vePreview"><div class="ve-scroll">' + parseMd(editor.content || '') + '</div></div>' +
          '</div>' +
       '</main>' +
     '</div>' +
@@ -1420,29 +1455,62 @@ function renderEditor() {
     '<div class="d-flex align-items-center gap-3 px-3 flex-shrink-0 text-white small" style="height:24px;background:var(--bs-primary-bg-subtle);background-color:#0d6efd">' +
       '<span><i class="bi bi-diagram-3 me-1"></i>' + esc(editor.gitBranch || 'main') + '</span>' +
       (editor.fileSha ? '<span><i class="bi bi-hash me-1"></i>' + esc(editor.fileSha.slice(0, 7)) + '</span>' : '') +
-      '<span class="d-flex align-items-center' + (editor.unsaved ? '' : ' hidden') + '" id="veUnsavedBar"><span class="ve-unsaved-dot me-1"></span>有未保存更改</span>' +
+       '<span class="d-flex align-items-center' + (editor.unsaved ? '' : ' d-none') + '" id="veUnsavedBar"><span class="ve-unsaved-dot me-1"></span>有未保存更改</span>' +
       '<span class="ms-auto">VanillaEditor v0.1.0</span>' +
       '<span id="veClock">' + new Date().toLocaleTimeString() + '</span>' +
     '</div>';
 
   const ta = document.getElementById('veEditor');
   if (ta) {
-    ta.addEventListener('input', e => onEditorChange(e.target.value));
+    ta.value = editor.content;
+    renderHighlight(ta.value);
+    ta.addEventListener('input', e => {
+      editor.content = e.target.value;
+      editor.unsaved = true;
+      const pv = document.getElementById('vePreview');
+      if (pv && !pv.classList.contains('d-none')) {
+        const scrollEl = pv.querySelector('.ve-scroll');
+        if (scrollEl) scrollEl.innerHTML = parseMd(editor.content);
+        else pv.innerHTML = '<div class="ve-scroll">' + parseMd(editor.content) + '</div>';
+      }
+      renderHighlight(editor.content);
+      // 同步标签页未保存状态
+      const tab = openTabs.find(t => t.id === activeTabId);
+      if (tab) tab.unsaved = editor.unsaved;
+      document.querySelectorAll('.ve-unsaved-dot').forEach(el => el.classList.toggle('d-none', !editor.unsaved));
+      const ub = document.getElementById('veUnsavedBar');
+      if (ub) ub.classList.toggle('d-none', !editor.unsaved);
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(async () => {
+        if (!editor.activeDocId || !editor.activeFilePath) return;
+        const r = await apiFetch('/files/' + editor.activeDocId + '/' + encodeURIComponent(editor.activeFilePath), {
+          method: 'PUT', body: JSON.stringify({ content: editor.content })
+        });
+        if (r) {
+          editor.unsaved = false;
+          if (tab) tab.unsaved = false;
+          document.querySelectorAll('.ve-unsaved-dot').forEach(el => el.classList.add('d-none'));
+          if (ub) ub.classList.add('d-none');
+          toast('已保存', 'ok');
+        }
+      }, 1500);
+    });
     ta.addEventListener('keydown', e => {
       if (e.key !== 'Tab') return;
       e.preventDefault();
       const s = ta.selectionStart, en = ta.selectionEnd;
       ta.value = ta.value.slice(0, s) + '  ' + ta.value.slice(en);
       ta.selectionStart = ta.selectionEnd = s + 2;
-      onEditorChange(ta.value);
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    // 同步高亮层初始内容
-    const hl = document.getElementById('veHighlight');
-    if (hl) hl.innerHTML = hlMd(ta.value);
-    // 滚动同步
-    const hlEl = hl;
+    // 滚动同步：高亮层 + 行号 + 预览区
+    const lnEl = document.getElementById('veLnNums');
     ta.addEventListener('scroll', () => {
+      const hlEl = document.getElementById('veHighlight');
       if (hlEl) { hlEl.scrollTop = ta.scrollTop; hlEl.scrollLeft = ta.scrollLeft; }
+      if (lnEl) { lnEl.scrollTop = ta.scrollTop; }
+      const pvScroll = document.querySelector('#vePreview .ve-scroll');
+      if (pvScroll) { pvScroll.scrollTop = ta.scrollTop; pvScroll.scrollLeft = ta.scrollLeft; }
     });
   }
   applyLayout();
@@ -1770,10 +1838,10 @@ async function loadAccessControl() {
 async function toggleAccess(enabled) {
   try {
     if (enabled) {
-      const r = await apiFetch('/access/enable', { method: 'POST' });
+      const r = await apiFetch('/access/enable', { method: 'POST', body: '{}' });
       if (r) toast('远程访问已开启', 'ok');
     } else {
-      await apiFetch('/access/disable', { method: 'POST' });
+      await apiFetch('/access/disable', { method: 'POST', body: '{}' });
       toast('远程访问已关闭', 'info');
     }
     loadAccessControl();

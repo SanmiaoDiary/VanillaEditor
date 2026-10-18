@@ -26,35 +26,64 @@ body { overflow: hidden; }
 .ve-tree-item.on { background: rgba(255,255,255,.12); }
 .ve-tree-item .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* editor */
-.ve-editor { flex: 1; width: 100%; height: 100%; background: transparent; color: transparent; border: none; resize: none; outline: none; padding: 12px 16px; font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace; font-size: var(--ed-font-size); line-height: 1.6; tab-size: 2; caret-color: var(--bs-body-color); }
+/* editor — 高亮层与textarea共享字体/行高/内边距/字距，光标天然对齐 */
+.ve-editor {
+  flex: 1; width: 100%; height: 100%;
+  background: transparent; color: transparent;
+  border: none; resize: none; outline: none;
+  padding: 12px 16px;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: var(--ed-font-size); line-height: 1.6; letter-spacing: 0; tab-size: 2;
+  white-space: pre-wrap; word-wrap: break-word;
+  overflow-y: auto; overflow-x: auto;
+  caret-color: var(--bs-body-color);
+}
 .ve-edp { position: relative; overflow: hidden; }
-.ve-hl { position: absolute; inset: 0; margin: 0; padding: 12px 16px; font-family: inherit; font-size: inherit; line-height: inherit; tab-size: inherit; white-space: pre-wrap; word-wrap: break-word; overflow-y: auto; overflow-x: auto; color: var(--bs-secondary-color); pointer-events: none; }
+.ve-hl {
+  position: absolute; inset: 0;
+  margin: 0; padding: 12px 16px;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-size: var(--ed-font-size); line-height: 1.6; letter-spacing: 0; tab-size: 2;
+  white-space: pre-wrap; word-wrap: break-word;
+  overflow-y: auto; overflow-x: auto;
+  color: var(--bs-secondary-color); pointer-events: none;
+}
 .ve-hl code { background: var(--bs-tertiary-bg); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
-.ve-hl pre { background: var(--bs-tertiary-bg); padding: 12px; border-radius: 6px; margin: 8px 0; }
-.ve-hl pre code { background: none; padding: 0; }
-.ve-hl h1, .ve-hl h2, .ve-hl h3, .ve-hl h4, .ve-hl h5, .ve-hl h6 { border-bottom: 1px solid var(--bs-border-color); padding-bottom: 4px; margin-bottom: 8px; }
-.ve-hl h1 { font-size: 1.8em; } .ve-hl h2 { font-size: 1.5em; } .ve-hl h3 { font-size: 1.25em; }
-.ve-hl blockquote { border-left: 3px solid var(--ve-accent); padding-left: 12px; color: var(--bs-secondary-color); margin: 8px 0; }
-.ve-hl hr { border-color: var(--bs-border-color); margin: 12px 0; }
 .ve-hl .hl-b, .ve-hl strong { font-weight: 700; color: var(--bs-body-color); }
 .ve-hl .hl-i, .ve-hl em { font-style: italic; color: var(--bs-emphasis-color); }
 .ve-hl .hl-lnk { color: #79b8ff; text-decoration: underline; }
 .ve-hl .hl-url { color: var(--bs-secondary-color); }
 .ve-hl .hl-d { text-decoration: line-through; color: var(--bs-secondary-color); }
 .ve-hl .hl-img { color: var(--bs-secondary-color); }
-.ve-hl .hl-h1 { color: var(--ve-accent); }
-.ve-hl .hl-h2 { color: #e06c75; }
-.ve-hl .hl-h3 { color: #c678dd; }
-.ve-hl .hl-h4 { color: #d19a66; }
-.ve-hl .hl-h5 { color: #98c379; }
-.ve-hl .hl-h6 { color: #61afef; }
+.ve-hl .hl-mk { color: #79b8ff; font-weight: 600; }
+
+/* line numbers */
+.ve-editor-area { flex: 1; display: flex; overflow: hidden; min-width: 0; }
+.ve-lngutter {
+  flex-shrink: 0; width: 44px;
+  background: var(--bs-body-bg);
+  border-right: 1px solid var(--bs-border-color);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  user-select: none;
+}
+.ve-lngutter-inner {
+  padding: 12px 8px 12px 4px;
+  font-family: inherit; font-size: inherit; line-height: inherit;
+  color: var(--bs-secondary-color);
+  text-align: right; white-space: pre;
+  overflow: hidden;
+}
+.ve-editor-scroll { flex: 1; display: flex; position: relative; overflow: hidden; min-width: 0; }
+
+/* split layout */
 .ve-split { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 @media (min-width: 768px) { .ve-split { flex-direction: row; } }
 .ve-split .pane { flex: 1 1 0; min-width: 0; overflow: hidden; }
-.ve-preview { padding: 16px; border-top: 1px solid var(--bs-border-color); }
+
+/* preview — 桌面端默认折叠，点击按钮展开；空内容时保持面板空间 */
+.ve-preview { padding: 16px; border-top: 1px solid var(--bs-border-color); overflow-y: auto; min-height: 100px; }
 @media (min-width: 768px) { .ve-preview { border-top: none; border-left: 1px solid var(--bs-border-color); } }
-.ve-preview h1, .ve-preview h2, .ve-preview h3 { border-bottom: 1px solid var(--bs-border-color); padding-bottom: 4px; margin-bottom: 8px; }
 .ve-preview code { background: var(--bs-tertiary-bg); padding: 2px 5px; border-radius: 3px; font-size: 12px; }
 .ve-preview pre { background: var(--bs-tertiary-bg); padding: 12px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
 .ve-preview pre code { background: none; padding: 0; }
@@ -66,7 +95,11 @@ body { overflow: hidden; }
 /* misc */
 .ve-unsaved-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ve-unsaved); display: inline-block; flex-shrink: 0; }
 .hidden { display: none !important; }
-.ve-scroll { flex: 1; overflow-y: auto; }
+.ve-scroll { flex: 1; overflow-y: auto; padding: 16px; }
+/* 标签页关闭按钮 hover */
+.ve-tabs .ve-tab:hover .ve-tab-close { display: flex !important; }
+.ve-tab-close { display: none; width: 18px; height: 18px; align-items: center; justify-content: center; border-radius: 3px; color: var(--bs-secondary-color); font-size: 12px; cursor: pointer; line-height: 1; }
+.ve-tab-close:hover { background: var(--bs-tertiary-bg); color: var(--bs-body-color); }
 @media (max-width: 991.98px) { .offcanvas-lg { --bs-offcanvas-width: 320px; } }
 
 /* resizable splitters */
@@ -91,3 +124,5 @@ body { overflow: hidden; }
 /* workspace directory browser */
 .ve-ws-item { cursor: pointer; transition: background .1s; }
 .ve-ws-item:hover { background: var(--bs-tertiary-bg); }
+/* 模态框水平居中 */
+#veModal .modal-dialog { margin-left: auto; margin-right: auto; }
