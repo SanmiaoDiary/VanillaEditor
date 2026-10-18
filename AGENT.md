@@ -82,17 +82,49 @@
 
 ## 提交规范
 
-**每次完成任何代码修改后，必须提交 commit。**
+**每次完成任何代码修改后，必须执行完整的工作流：记录日志 → 提交 → 推送。**
+
+### 工作流步骤
 
 ```bash
+# 1. 更新 CHANGELOG.md（在 "## [Unreleased]" 下方添加新版本条目）
+#    版本号规则：根据变更幅度递增
+#    - fix: bug修复        → 补丁版本 v0.1.x+1
+#    - feat: 新功能        → 次版本 v0.x+1.0
+#    - breaking: 破坏性变更 → 主版本 vX+1.0.0
+#
+# 2. 统一更新所有文件中的版本号
+#    - static/js/app.js     状态栏 "VanillaEditor vX.Y.Z"
+#    - DESIGN.md            封面版本号
+#    - GUI_DESIGN.md        封面版本号
+#    - CHANGELOG.md         新增版本条目（如上一步所述）
+#    - AGENT.md             更新日志末尾追加新版本摘要
+#
+# 3. 提交所有变更
 git add .
-git commit -m "描述你做了什么"
+git commit -m "docs: bump version to v0.1.3, add changelog entry"
+#
+# 4. 推送到远程
+git push
 ```
 
-- 提交前确保代码可以正常运行（至少不报语法错误）
-- commit message 必须使用中文，简短描述变更内容
+### commit message 规范
+
+- 使用中文，简短描述变更内容
 - 格式：`fix:` / `feat:` / `docs:` / `chore:` 开头（参考 Conventional Commits）
-- 不在 commit 中提交 `static/`、`node_modules/`、`data/`、`__pycache__/`
+- **不在 commit 中提交**：`data/`、`.venv/`、`__pycache__/`、`.vscode/`、`_debug*`、`_test_*`
+
+### 版本号检查清单
+
+提交前确认以下文件的版本号已同步更新：
+
+| 文件 | 位置 |
+|------|------|
+| `static/js/app.js` | 状态栏文本 "VanillaEditor v0.1.0" → "VanillaEditor v0.1.3" |
+| `CHANGELOG.md` | 顶部的版本条目 |
+| `DESIGN.md` | 文档标题下的版本号 |
+| `GUI_DESIGN.md` | 文档标题下的版本号 |
+| `AGENT.md` | 更新日志末尾追加新条目 |
 
 ---
 

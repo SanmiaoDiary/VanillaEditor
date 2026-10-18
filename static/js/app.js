@@ -1456,7 +1456,7 @@ function renderEditor() {
       '<span><i class="bi bi-diagram-3 me-1"></i>' + esc(editor.gitBranch || 'main') + '</span>' +
       (editor.fileSha ? '<span><i class="bi bi-hash me-1"></i>' + esc(editor.fileSha.slice(0, 7)) + '</span>' : '') +
        '<span class="d-flex align-items-center' + (editor.unsaved ? '' : ' d-none') + '" id="veUnsavedBar"><span class="ve-unsaved-dot me-1"></span>有未保存更改</span>' +
-      '<span class="ms-auto">VanillaEditor v0.1.0</span>' +
+      '<span class="ms-auto">VanillaEditor v0.1.3</span>' +
       '<span id="veClock">' + new Date().toLocaleTimeString() + '</span>' +
     '</div>';
 
@@ -1670,7 +1670,7 @@ async function renderSetting() {
 
     // status bar
     '<div class="d-flex align-items-center gap-3 px-3 flex-shrink-0 text-white small" style="height:24px;background-color:#0d6efd">' +
-      '<span class="ms-auto">VanillaEditor v0.1.0</span>' +
+      '<span class="ms-auto">VanillaEditor v0.1.3</span>' +
       '<span id="veClock">' + new Date().toLocaleTimeString() + '</span>' +
     '</div>';
 
