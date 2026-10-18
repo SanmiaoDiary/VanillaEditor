@@ -25,6 +25,8 @@ body { overflow: hidden; }
 .ve-tree-item:hover { background: var(--bs-hover-bg, rgba(255,255,255,.08)); }
 .ve-tree-item.on { background: rgba(255,255,255,.12); }
 .ve-tree-item .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ve-ws-close { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--bs-secondary-color); font-size: 12px; cursor: pointer; flex-shrink: 0; transition: border-color .15s, color .15s, background .15s; }
+.ve-ws-close:hover { border-color: var(--bs-border-color); color: var(--bs-body-color); background: var(--bs-tertiary-bg); }
 
 /* editor — 高亮层与textarea共享字体/行高/内边距/字距，光标天然对齐 */
 .ve-editor {
@@ -97,8 +99,7 @@ body { overflow: hidden; }
 .hidden { display: none !important; }
 .ve-scroll { flex: 1; overflow-y: auto; padding: 16px; }
 /* 标签页关闭按钮 hover */
-.ve-tabs .ve-tab:hover .ve-tab-close { display: flex !important; }
-.ve-tab-close { display: none; width: 18px; height: 18px; align-items: center; justify-content: center; border-radius: 3px; color: var(--bs-secondary-color); font-size: 12px; cursor: pointer; line-height: 1; }
+.ve-tabs .ve-tab-close { display: flex; width: 18px; height: 18px; align-items: center; justify-content: center; border-radius: 3px; color: var(--bs-secondary-color); font-size: 12px; cursor: pointer; line-height: 1; flex-shrink: 0; transition: background .15s, color .15s; }
 .ve-tab-close:hover { background: var(--bs-tertiary-bg); color: var(--bs-body-color); }
 @media (max-width: 991.98px) { .offcanvas-lg { --bs-offcanvas-width: 320px; } }
 
@@ -106,6 +107,7 @@ body { overflow: hidden; }
 .ve-resizer { flex-shrink: 0; background: var(--bs-border-color); transition: background .15s; }
 .ve-resizer-v { width: 4px; cursor: col-resize; }
 .ve-resizer-v:hover, .ve-resizer-v.active { background: var(--ve-accent); }
+.ve-resizer-hidden { display: none !important; }
 .ve-resizer-h { height: 4px; cursor: row-resize; }
 .ve-resizer-h:hover, .ve-resizer-h.active { background: var(--ve-accent); }
 

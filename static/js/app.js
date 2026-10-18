@@ -37,6 +37,7 @@ let saveTimer = null;
 let fontSize = parseInt(localStorage.getItem('ve_font_size') || '14', 10);
 let mobilePreviewMode = localStorage.getItem('ve_mobile_preview') === '1';
 let previewVisible = false; // 桌面端预览默认折叠
+let expandedWorkspaces = {}; // 工作区展开/收起状态
 // 已打开的标签页
 let openTabs = [];
 let activeTabId = null;
@@ -244,17 +245,20 @@ function renderHighlight(content) {
 
 function togglePreview() {
   previewVisible = !previewVisible;
-  // 桌面端：切换预览面板显示/隐藏（仅改 class，不做 DOM 增删）
+  // 桌面端：预览面板与分割条一起显示/隐藏，让编辑区占满宽度
   const pr = document.getElementById('vePreview');
+  const resizer = document.getElementById('veSplitResizer');
   const btn = document.getElementById('vePreviewToggleDesktop');
   if (pr) {
     if (previewVisible) {
       pr.classList.remove('d-none');
       pr.style.display = '';
+      if (resizer) resizer.classList.remove('ve-resizer-hidden');
       if (btn) btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
     } else {
       pr.classList.add('d-none');
       pr.style.display = 'none';
+      if (resizer) resizer.classList.add('ve-resizer-hidden');
       if (btn) btn.innerHTML = '<i class="bi bi-eye"></i>';
     }
   }
@@ -399,7 +403,10 @@ async function openWorkspaceModal() {
   const dialogHtml =
     '<div class="mb-3">' +
       '<label class="form-label small text-secondary">服务器路径</label>' +
-      '<input class="form-control form-control-sm" id="wsPathInput" value="' + esc(wsBrowsePath) + '">' +
+      '<div class="input-group input-group-sm">' +
+        '<input class="form-control" id="wsPathInput" value="' + esc(wsBrowsePath) + '" onkeydown="if(event.key===\'Enter\'){event.preventDefault();wsJumpToPath();}">' +
+        '<button class="btn btn-outline-secondary" type="button" onclick="wsJumpToPath()" title="跳转到该路径"><i class="bi bi-arrow-right"></i></button>' +
+      '</div>' +
     '</div>' +
     '<div class="d-flex gap-1 mb-3 flex-wrap">' +
       '<button class="btn btn-sm btn-outline-secondary" onclick="wsGoDefault()" title="回到默认工作区"><i class="bi bi-house"></i> 默认</button>' +
@@ -429,14 +436,6 @@ async function renderWorkspaceDialog() {
     return;
   }
   let html = '';
-  // 上级目录（非根目录时显示）
-  if (wsBrowsePath !== wsDefaultRoot && wsBrowsePath !== '/') {
-    html += '<div class="ve-ws-item py-2 px-3 border-bottom border-secondary-subtle cursor-pointer text-secondary" onclick="wsGoParent()">' +
-      '<i class="bi bi-arrow-return-left me-2"></i>.. 返回上级</div>';
-  }
-  // 默认工作区根
-  html += '<div class="ve-ws-item py-2 px-3 border-bottom border-secondary-subtle cursor-pointer text-primary" onclick="wsGoDefault()">' +
-    '<i class="bi bi-house me-2"></i>默认工作区</div>';
   // 子目录
   (r.dirs || []).forEach(d => {
     html += '<div class="ve-ws-item py-2 px-3 border-bottom border-secondary-subtle cursor-pointer" onclick="wsOpenDir(\'' + esc(d.path) + '\')">' +
@@ -462,6 +461,12 @@ function formatSize(bytes) {
 }
 
 function wsGoDefault() { wsNavigateTo(wsDefaultRoot); }
+function wsJumpToPath() {
+  const inp = document.getElementById('wsPathInput');
+  const p = inp ? inp.value.trim() : wsBrowsePath;
+  if (!p) return toast('请输入路径', 'err');
+  wsNavigateTo(p);
+}
 function wsGoParent() {
   if (wsBrowsePath === wsDefaultRoot || wsBrowsePath === '/') return;
   const parts = wsBrowsePath.replace(/\\/g, '/').split('/').filter(Boolean);
@@ -561,6 +566,19 @@ async function selectWorkspace(docId) {
       wsFileCache[docId] = (await apiFetch('/files/' + docId)) || [];
     } catch (e) { wsFileCache[docId] = []; }
   }
+  renderEditor();
+}
+
+// 工作区折叠/展开
+function toggleWorkspace(docId) {
+  expandedWorkspaces[docId] = !expandedWorkspaces[docId];
+  if (expandedWorkspaces[docId] && !wsFileCache[docId]) {
+    apiFetch('/files/' + docId).then(files => {
+      wsFileCache[docId] = files || [];
+      renderEditor();
+    }).catch(() => { wsFileCache[docId] = []; });
+  }
+  editor.activeDocId = docId;
   renderEditor();
 }
 
@@ -891,7 +909,7 @@ function showModal(title, body, footer) {
   el.id = 'veModal';
   el.tabIndex = -1;
   el.innerHTML =
-    '<div class="modal-dialog modal-dialog-scrollable"><div class="modal-content">' +
+    '<div class="modal-dialog modal-dialog-scrollable modal-dialog-centered"><div class="modal-content">' +
       '<div class="modal-header py-2">' +
         '<h5 class="modal-title fs-6">' + title + '</h5>' +
         '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>' +
@@ -1237,40 +1255,41 @@ function renderEditor() {
       '</span>' +
     '</div>' +
     '<div class="ve-scroll py-1">' +
-      // 工作区列表
-       (workspaces.length > 0 ?
-         '<div class="px-3 py-2 border-bottom border-secondary-subtle">' +
-           '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">工作区</span>' +
-         '</div>' +
-         workspaces.map(ws => {
-           const wsFiles = wsFileCache[ws.id] || [];
-           const isActive = editor.activeDocId === ws.id;
-           return '<div>' +
-             '<div class="ve-tree-item' + (isActive ? ' on' : '') + '" onclick="selectWorkspace(\'' + esc(ws.id) + '\')">' +
-               '<i class="bi bi-folder2-open"></i>' +
-               '<span class="nm" title="' + esc(ws.source_path || '') + '">' + esc(ws.name) + '</span>' +
-               '<span class="text-secondary small">' + wsFiles.length + '</span>' +
-               '<button class="btn btn-sm py-0 text-secondary" style="font-size:11px;margin-left:2px" onclick="event.stopPropagation();closeWorkspace(\'' + esc(ws.id) + '\')" title="关闭工作区"><i class="bi bi-x"></i></button>' +
+       // 工作区列表（按 id 去重）
+        (workspaces.length > 0 ?
+          '<div class="px-3 py-2 border-bottom border-secondary-subtle">' +
+            '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">工作区</span>' +
+          '</div>' +
+          workspaces.filter((ws, i, arr) => arr.findIndex(x => x.id === ws.id) === i).map(ws => {
+            const wsFiles = wsFileCache[ws.id] || [];
+            const isActive = editor.activeDocId === ws.id;
+            const expanded = !!expandedWorkspaces[ws.id];
+            return '<div>' +
+              '<div class="ve-tree-item' + (isActive ? ' on' : '') + '" onclick="toggleWorkspace(\'' + esc(ws.id) + '\')">' +
+                '<i class="bi ' + (expanded ? 'bi-folder2-open' : 'bi-folder2') + '"></i>' +
+                '<span class="nm" title="' + esc(ws.source_path || '') + '">' + esc(ws.name) + '</span>' +
+                '<span class="text-secondary small">' + wsFiles.length + '</span>' +
+                '<button class="ve-ws-close" onclick="event.stopPropagation();closeWorkspace(\'' + esc(ws.id) + '\')" title="关闭工作区"><i class="bi bi-x"></i></button>' +
+              '</div>' +
+              (expanded && wsFiles.length > 0 ? wsFiles.map(f =>
+                '<div class="ve-tree-item ps-4' + (editor.activeFilePath === f.path ? ' on' : '') + '" onclick="openFile(\'' + esc(ws.id) + '\',\'' + esc(f.path) + '\')">' +
+                  '<i class="bi ' + (f.path.endsWith('.md') ? 'bi-file-earmark-text' : 'bi-file-earmark') + '"></i>' +
+                  '<span class="nm">' + esc(f.path.split('/').pop()) + '</span>' +
+                '</div>').join('') : '') +
+            '</div>';
+          }).join('') :
+          '<div class="px-3 py-2 text-secondary small">点击右上角 <i class="bi bi-folder-open"></i> 按钮打开工作区</div>') +
+        (workspaces.length > 0 ? '<hr class="my-1">' : '') +
+       (sidebarDocs.filter(d => !workspaces.some(w => w.id === d.id)).length === 0 ?
+         '<div class="px-3 py-2 text-secondary small">暂无文档，点击右上角新建</div>' :
+         sidebarDocs.filter(d => !workspaces.some(w => w.id === d.id)).map(doc =>
+           '<div>' +
+             '<div class="ve-tree-item" onclick="toggleDoc(\'' + esc(doc.id) + '\')">' +
+               '<i class="bi ' + (expandedDocs[doc.id] ? 'bi-folder2-open' : 'bi-folder') + '"></i>' +
+               '<span class="nm">' + esc(doc.name) + '</span>' +
+               '<span class="text-secondary small">' + (doc.file_count || 0) + '</span>' +
              '</div>' +
-             (isActive && wsFiles.length > 0 ? wsFiles.map(f =>
-               '<div class="ve-tree-item ps-4' + (editor.activeFilePath === f.path ? ' on' : '') + '" onclick="openFile(\'' + esc(ws.id) + '\',\'' + esc(f.path) + '\')">' +
-                 '<i class="bi ' + (f.path.endsWith('.md') ? 'bi-file-earmark-text' : 'bi-file-earmark') + '"></i>' +
-                 '<span class="nm">' + esc(f.path.split('/').pop()) + '</span>' +
-               '</div>').join('') : '') +
-           '</div>';
-         }).join('') :
-         '<div class="px-3 py-2 text-secondary small">点击右上角 <i class="bi bi-folder-open"></i> 按钮打开工作区</div>') +
-       (workspaces.length > 0 ? '<hr class="my-1">' : '') +
-      (sidebarDocs.length === 0 ?
-        '<div class="px-3 py-2 text-secondary small">暂无文档，点击右上角新建</div>' :
-        sidebarDocs.map(doc =>
-          '<div>' +
-            '<div class="ve-tree-item" onclick="toggleDoc(\'' + esc(doc.id) + '\')">' +
-              '<i class="bi ' + (expandedDocs[doc.id] ? 'bi-folder2-open' : 'bi-folder') + '"></i>' +
-              '<span class="nm">' + esc(doc.name) + '</span>' +
-              '<span class="text-secondary small">' + (doc.file_count || 0) + '</span>' +
-            '</div>' +
-            (expandedDocs[doc.id] && doc.children ? doc.children.map(f =>
+             (expandedDocs[doc.id] && doc.children ? doc.children.map(f =>
               '<div class="ve-tree-item ps-4' + (editor.activeDocId === doc.id && editor.activeFilePath === f.path ? ' on' : '') + '" onclick="openFile(\'' + esc(doc.id) + '\',\'' + esc(f.path) + '\')">' +
                 '<i class="bi ' + (f.path.endsWith('.md') ? 'bi-file-earmark-text' : 'bi-file-earmark') + '"></i>' +
                 '<span class="nm">' + esc(f.path.split('/').pop()) + '</span>' +
@@ -1440,7 +1459,7 @@ function renderEditor() {
                 '</div>' +
               '</div>' +
             '</div>' +
-            '<div class="ve-resizer ve-resizer-v d-none d-md-block" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' +
+            '<div class="ve-resizer ve-resizer-v d-none d-md-block' + (previewVisible ? '' : ' ve-resizer-hidden') + '" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' +
             '<div class="pane ve-preview' + (previewVisible ? '' : ' d-none') + '" id="vePreview"><div class="ve-scroll">' + parseMd(editor.content || '') + '</div></div>' +
           '</div>' +
       '</main>' +
@@ -1469,10 +1488,11 @@ function renderEditor() {
         else pv.innerHTML = '<div class="ve-scroll">' + parseMd(editor.content) + '</div>';
       }
       renderHighlight(editor.content);
-      // 同步标签页未保存状态
+      // 同步标签页未保存状态（只更新当前标签页的小黄点，避免影响其他标签）
       const tab = openTabs.find(t => t.id === activeTabId);
       if (tab) tab.unsaved = editor.unsaved;
-      document.querySelectorAll('.ve-unsaved-dot').forEach(el => el.classList.toggle('d-none', !editor.unsaved));
+      const activeTabDot = document.querySelector('.ve-tab.on .ve-unsaved-dot');
+      if (activeTabDot) activeTabDot.classList.toggle('d-none', !editor.unsaved);
       const ub = document.getElementById('veUnsavedBar');
       if (ub) ub.classList.toggle('d-none', !editor.unsaved);
       clearTimeout(saveTimer);
@@ -1516,6 +1536,7 @@ function renderEditor() {
 
 // ── Settings page ────────────────────────────────────────────
 let currentSettingTab = 'account';
+let settingSidebarCollapsed = false;
 
 async function renderSetting() {
   const app = document.getElementById('app');
@@ -1547,12 +1568,12 @@ async function renderSetting() {
           '</div>' +
         '</div>';
        case 'network':
-         return '<div class="card h-100">' +
+         return '<div class="card">' +
            '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-shield-lock me-1"></i>远程访问控制</div>' +
-           '<div class="card-body">' +
-             '<p class="text-secondary small">远程控制功能开发中，敬请期待。</p>' +
+           '<div class="card-body" id="veAccessControlBody">' +
+             '<p class="text-secondary small">加载中…</p>' +
            '</div>' +
-           '<div class="card-header bg-transparent border-secondary-subtle mt-3"><i class="bi bi-hdd-network me-1"></i>同步远端设备</div>' +
+           '<div class="card-header bg-transparent border-secondary-subtle border-top"><i class="bi bi-hdd-network me-1"></i>同步远端设备</div>' +
            '<div class="card-body" id="veRemoteListBody">' +
              '<p class="text-secondary small">加载中…</p>' +
            '</div>' +
@@ -1606,6 +1627,9 @@ async function renderSetting() {
         '<button class="navbar-toggler border-0 shadow-none d-lg-none" type="button" id="veSettingsToggler" aria-label="展开菜单">' +
           '<i class="bi bi-list"></i>' +
         '</button>' +
+        '<button class="btn btn-sm btn-outline-secondary border-0 shadow-none me-2" type="button" id="veSettingSidebarToggle" title="收起/展开侧边栏">' +
+          '<i class="bi bi-' + (settingSidebarCollapsed ? 'chevron-right' : 'chevron-left') + '"></i>' +
+        '</button>' +
         '<div class="collapse navbar-collapse" id="veSettingsNav">' +
           '<ul class="navbar-nav me-auto">' +
             '<li class="nav-item"><a class="nav-link" href="#/editor"><i class="bi bi-pencil-square me-1"></i>编辑器</a></li>' +
@@ -1642,7 +1666,8 @@ async function renderSetting() {
 
     '<div class="d-flex flex-grow-1 overflow-hidden">' +
       // left menu sidebar
-      '<nav class="d-flex flex-column flex-shrink-0 border-end border-secondary-subtle" style="width:200px;background:var(--bs-body-bg)">' +
+      (settingSidebarCollapsed ? '' :
+      '<nav class="d-flex flex-column flex-shrink-0 border-end border-secondary-subtle" id="veSettingSidebar" style="width:200px;background:var(--bs-body-bg)">' +
         '<div class="p-3 border-bottom border-secondary-subtle">' +
           '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">设置</span>' +
         '</div>' +
@@ -1656,7 +1681,7 @@ async function renderSetting() {
             '</div>'
           ).join('') +
         '</div>' +
-      '</nav>' +
+      '</nav>') +
       // content area
       '<div class="flex-grow-1 overflow-auto p-4" id="veSettingContent">' +
         renderContent(currentSettingTab) +
@@ -1674,6 +1699,8 @@ async function renderSetting() {
   const st = document.getElementById('veSettingsToggler');
   if (sc) sc.addEventListener('click', closeSettingsMenu);
   if (st) st.addEventListener('click', () => { const el = document.getElementById('veSettingsMenuOffcanvas'); if (!el.classList.contains('show')) el.classList.add('show'); });
+  const ssb = document.getElementById('veSettingSidebarToggle');
+  if (ssb) ssb.addEventListener('click', toggleSettingSidebar);
   document.addEventListener('click', e => {
     if (!e.target.closest('#veSettingsMenuOffcanvas') && !e.target.closest('#veSettingsToggler')) {
       closeSettingsMenu();
@@ -1703,6 +1730,14 @@ function switchSettingTab(tab) {
   }
 }
 
+function toggleSettingSidebar() {
+  settingSidebarCollapsed = !settingSidebarCollapsed;
+  const sidebar = document.getElementById('veSettingSidebar');
+  if (sidebar) sidebar.style.display = settingSidebarCollapsed ? 'none' : '';
+  const btn = document.getElementById('veSettingSidebarToggle');
+  if (btn) btn.innerHTML = '<i class="bi bi-' + (settingSidebarCollapsed ? 'chevron-right' : 'chevron-left') + '"></i>';
+}
+
 function renderSettingContent(tab) {
   // account
   if (tab === 'account') {
@@ -1722,10 +1757,10 @@ function renderSettingContent(tab) {
   }
   // network
   if (tab === 'network') {
-    return '<div class="card h-100" style="max-width:500px">' +
+    return '<div class="card">' +
       '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-shield-lock me-1"></i>远程访问控制</div>' +
       '<div class="card-body" id="veAccessControlBody"></div>' +
-      '<div class="card-header bg-transparent border-secondary-subtle mt-3"><i class="bi bi-hdd-network me-1"></i>同步远端设备</div>' +
+      '<div class="card-header bg-transparent border-secondary-subtle border-top"><i class="bi bi-hdd-network me-1"></i>同步远端设备</div>' +
       '<div class="card-body">' +
         '<p class="text-secondary small mb-2">将其他设备的 VE 地址添加为 Git 远端，即可端到端同步。当前作用文档：' +
           (editor.activeDocId ? '<span class="badge text-bg-secondary ms-1">' + esc(editor.activeDocId) + '</span>' : '<span class="text-warning ms-1">未选择</span>') +
