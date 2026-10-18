@@ -6,7 +6,7 @@ frontend/node_modules/
 data/
 .env
 *.log
-.vscode/settings.json
+.vscode/
 .venv/
 _debug*
 _test_*.html
