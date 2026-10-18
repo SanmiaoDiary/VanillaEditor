@@ -154,6 +154,79 @@ class GitService:
         code, out, err = self._git(repo_path, "push")
         return code == 0, err.strip() if code != 0 else ""
 
+    def fetch_all(self, username, doc_id):
+        """从所有远端拉取引用，但不合并。返回 (ok, error)"""
+        repo_path = self.ensure_repo(username, doc_id)
+        code, out, err = self._git(repo_path, "fetch", "--all", "--prune")
+        return code == 0, err.strip() if code != 0 else ""
+
+    def push_to(self, username, doc_id, remote):
+        repo_path = self.ensure_repo(username, doc_id)
+        code, out, err = self._git(repo_path, "push", remote)
+        return code == 0, err.strip() if code != 0 else ""
+
+    def pull_from(self, username, doc_id, remote):
+        repo_path = self.ensure_repo(username, doc_id)
+        code, out, err = self._git(repo_path, "pull", "--no-rebase", remote)
+        return code == 0, err.strip() if code != 0 else ""
+
+    def remote_list(self, username, doc_id):
+        """返回 [{name, url, push_url}]"""
+        repo_path = self.ensure_repo(username, doc_id)
+        code, out, _ = self._git(repo_path, "remote", "-v")
+        remotes = []
+        seen = set()
+        for line in out.strip().splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            name, url = parts[0], parts[1]
+            key = name + "|" + url
+            if key in seen:
+                continue
+            seen.add(key)
+            remotes.append({"name": name, "url": url})
+        return remotes
+
+    def remote_tracking(self, username, doc_id):
+        """返回当前分支的跟踪信息 {branch, remote, ahead, behind, diverged}"""
+        repo_path = self.ensure_repo(username, doc_id)
+        branch = self.current_branch(username, doc_id)
+        code, out, _ = self._git(repo_path, "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}")
+        upstream = out.strip() if code == 0 else ""
+        if not upstream:
+            return {"branch": branch, "remote": "", "ahead": 0, "behind": 0, "diverged": False, "synced": False}
+        # 本地领先/落后远端的提交数
+        code, out, _ = self._git(repo_path, "rev-list", "--left-right", "--count", f"{branch}...{upstream}")
+        ahead = behind = 0
+        if code == 0:
+            try:
+                parts = out.strip().split()
+                ahead = int(parts[0])
+                behind = int(parts[1])
+            except (ValueError, IndexError):
+                pass
+        remote = upstream.split("/")[0] if "/" in upstream else ""
+        return {
+            "branch": branch,
+            "remote": remote,
+            "ahead": ahead,
+            "behind": behind,
+            "diverged": ahead > 0 and behind > 0,
+            "synced": ahead == 0 and behind == 0,
+        }
+
+    def unmerged_files(self, username, doc_id):
+        """返回冲突（未合并）文件列表"""
+        repo_path = self.ensure_repo(username, doc_id)
+        code, out, _ = self._git(repo_path, "diff", "--name-only", "--diff-filter=U")
+        return [line for line in out.strip().splitlines() if line.strip()]
+
+    def has_uncommitted(self, username, doc_id):
+        repo_path = self.ensure_repo(username, doc_id)
+        code, out, _ = self._git(repo_path, "status", "--porcelain")
+        return bool(out.strip())
+
     def get_head_sha(self, username, doc_id):
         repo_path = self.ensure_repo(username, doc_id)
         code, out, err = self._git(repo_path, "rev-parse", "HEAD")

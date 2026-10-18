@@ -279,22 +279,78 @@ def create_app():
         ok, err = git_service.push(username, doc_id)
         return jsonify({"ok": ok, "error": err})
 
+    @app.route("/api/sync/status", methods=["GET"])
+    @require_auth
+    def sync_status():
+        """同步状态：分支、领先/落后、远端列表、是否有冲突/未提交"""
+        username = g.username
+        doc_id = request.args.get("doc_id", "")
+        if not doc_id:
+            return jsonify({"error": "doc_id required"}), 400
+        try:
+            tracking = git_service.remote_tracking(username, doc_id)
+            remotes = git_service.remote_list(username, doc_id)
+            conflicts = git_service.unmerged_files(username, doc_id)
+            dirty = git_service.has_uncommitted(username, doc_id)
+            return jsonify({
+                "tracking": tracking,
+                "remotes": remotes,
+                "conflicts": conflicts,
+                "dirty": dirty,
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/sync/fetch", methods=["POST"])
+    @require_auth
+    def sync_fetch():
+        username = g.username
+        data = request.get_json() or {}
+        doc_id = data.get("doc_id")
+        if not doc_id:
+            return jsonify({"error": "doc_id required"}), 400
+        ok, err = git_service.fetch_all(username, doc_id)
+        return jsonify({"ok": ok, "error": err})
+
+    @app.route("/api/sync/pull/<remote>", methods=["POST"])
+    @require_auth
+    def sync_pull_remote(remote):
+        username = g.username
+        data = request.get_json() or {}
+        doc_id = data.get("doc_id")
+        if not doc_id:
+            return jsonify({"error": "doc_id required"}), 400
+        ok, err = git_service.pull_from(username, doc_id, remote)
+        return jsonify({"ok": ok, "error": err})
+
+    @app.route("/api/sync/push/<remote>", methods=["POST"])
+    @require_auth
+    def sync_push_remote(remote):
+        username = g.username
+        data = request.get_json() or {}
+        doc_id = data.get("doc_id")
+        if not doc_id:
+            return jsonify({"error": "doc_id required"}), 400
+        ok, err = git_service.push_to(username, doc_id, remote)
+        return jsonify({"ok": ok, "error": err})
+
+    @app.route("/api/sync/conflicts", methods=["GET"])
+    @require_auth
+    def sync_conflicts():
+        username = g.username
+        doc_id = request.args.get("doc_id", "")
+        if not doc_id:
+            return jsonify([])
+        return jsonify(git_service.unmerged_files(username, doc_id))
+
     @app.route("/api/sync/remote", methods=["GET"])
     @require_auth
     def sync_remotes():
         username = g.username
-        data = request.get_json() or {}
-        doc_id = data.get("doc_id", "")
+        doc_id = request.args.get("doc_id", "")
         if not doc_id:
             return jsonify([])
-        repo_path = git_service._repo_path(username, doc_id)
-        code, out, _ = git_service._git(repo_path, "remote", "-v")
-        remotes = []
-        for line in out.strip().splitlines():
-            parts = line.split()
-            if len(parts) >= 2:
-                remotes.append({"name": parts[0], "url": parts[1]})
-        return jsonify(remotes)
+        return jsonify(git_service.remote_list(username, doc_id))
 
     @app.route("/api/sync/remote", methods=["POST"])
     @require_auth

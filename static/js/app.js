@@ -31,6 +31,7 @@ let expandedDocs = {};
 let commitMsg = '';
 let remotes = [];
 let commits = [];
+let syncStatus = null; // {tracking, remotes, conflicts, dirty}
 let isRegister = false;
 let loginError = '';
 let saveTimer = null;
@@ -62,6 +63,20 @@ async function apiFetch(path, opts = {}) {
     throw new Error(msg);
   }
   return res.json();
+}
+
+// 将 Git 原始错误翻译为友好提示
+function cleanGitError(err) {
+  if (!err) return '未知错误';
+  const e = String(err);
+  if (/non-fast-forward/.test(e)) return '远端有新的提交，请先拉取再推送';
+  if (/refusing to merge unrelated histories/.test(e)) return '本地与远端历史无关，需手动处理（可尝试重置或重新打开）';
+  if (/could not read from remote repository|Permission denied \(publickey\)|Could not resolve hostname/.test(e)) return '无法连接远端仓库，请检查地址与网络';
+  if (/Already up to date/.test(e)) return '已是最新';
+  if (/CONFLICT/.test(e)) return '合并冲突，请手动解决';
+  // 只取第一行有意义的信息
+  const line = e.split('\n').find(l => l.trim() && !l.startsWith('hint:') && !l.startsWith('error: failed to push'));
+  return line ? line.replace(/^fatal:\s*/, '').trim() : '同步失败';
 }
 
 // ── Toast ────────────────────────────────────────────────────
@@ -620,6 +635,9 @@ async function refreshSidebar() {
 }
 setInterval(refreshSidebar, 4000);
 window.addEventListener('focus', refreshSidebar);
+// 定期刷新同步状态（不触发整页重绘）
+setInterval(() => { if (auth.isLoggedIn && location.hash === '#/editor') loadSyncStatus(); }, 10000);
+window.addEventListener('focus', () => { if (auth.isLoggedIn) loadSyncStatus(); });
 
 async function openFile(docId, filePath) {
   editor.activeDocId = docId;
@@ -729,23 +747,64 @@ async function deleteDoc(docId) {
 // ── Git operations ───────────────────────────────────────────
 async function loadGitData() {
   if (!editor.activeDocId) return;
-  try { const r = await apiFetch('/sync/remote', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId }) }); if (r) remotes = r; } catch (e) {}
-  try { const r = await apiFetch('/history/' + editor.activeDocId); if (r) commits = r; } catch (e) {}
   try { const r = await apiFetch('/status/' + editor.activeDocId); if (r && r.branch) editor.gitBranch = r.branch; } catch (e) {}
+  try { const r = await apiFetch('/history/' + editor.activeDocId); if (r) commits = r; } catch (e) {}
+  await loadSyncStatus();
+}
+
+// 加载同步状态（分支跟踪、远端、冲突）
+async function loadSyncStatus() {
+  if (!editor.activeDocId) return;
+  try {
+    const r = await apiFetch('/sync/status?doc_id=' + encodeURIComponent(editor.activeDocId));
+    if (r) {
+      syncStatus = r;
+      remotes = r.remotes || [];
+    }
+  } catch (e) { syncStatus = null; }
+}
+
+async function refreshSyncStatus() {
+  await loadSyncStatus();
+  if (location.hash === '#/editor') renderEditor();
+  else if (location.hash === '#/setting') renderSetting();
 }
 
 async function pullGit() {
   if (!editor.activeDocId) return toast('请先选择文档', 'err');
   const r = await apiFetch('/sync/pull', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId }) });
   if (r && r.ok !== false) { await loadGitData(); toast('拉取成功', 'ok'); if (location.hash === '#/editor') renderEditor(); }
-  else toast('拉取失败：' + (r && r.error ? r.error : '未知错误'), 'err');
+  else toast(cleanGitError(r && r.error), 'err');
 }
 
 async function pushGit() {
   if (!editor.activeDocId) return toast('请先选择文档', 'err');
+  if (editor.unsaved) await saveNow();
   const r = await apiFetch('/sync/push', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId }) });
   if (r && r.ok !== false) { await loadGitData(); toast('推送成功', 'ok'); }
-  else toast('推送失败：' + (r && r.error ? r.error : '未知错误'), 'err');
+  else toast(cleanGitError(r && r.error), 'err');
+}
+
+async function fetchAllRemotes() {
+  if (!editor.activeDocId) return toast('请先选择文档', 'err');
+  const r = await apiFetch('/sync/fetch', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId }) });
+  if (r && r.ok !== false) { await refreshSyncStatus(); toast('已获取远端最新状态', 'ok'); }
+  else toast(cleanGitError(r && r.error), 'err');
+}
+
+async function pushToRemote(name) {
+  if (!editor.activeDocId) return toast('请先选择文档', 'err');
+  if (editor.unsaved) await saveNow();
+  const r = await apiFetch('/sync/push/' + encodeURIComponent(name), { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId }) });
+  if (r && r.ok !== false) { await refreshSyncStatus(); toast('已推送到 ' + name, 'ok'); }
+  else toast(cleanGitError(r && r.error), 'err');
+}
+
+async function pullFromRemote(name) {
+  if (!editor.activeDocId) return toast('请先选择文档', 'err');
+  const r = await apiFetch('/sync/pull/' + encodeURIComponent(name), { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId }) });
+  if (r && r.ok !== false) { await loadGitData(); toast('已从 ' + name + ' 拉取', 'ok'); if (location.hash === '#/editor') renderEditor(); }
+  else toast(cleanGitError(r && r.error), 'err');
 }
 
 async function commitGit() {
@@ -756,9 +815,17 @@ async function commitGit() {
   else toast('提交失败', 'err');
 }
 
+// 完整同步：先保存本地改动 → 拉取 → 推送 → 刷新状态
 async function syncRemote() {
-  await pushGit();
+  if (!editor.activeDocId) return toast('请先选择文档', 'err');
+  if (editor.unsaved) {
+    await saveNow();
+    if (editor.unsaved) return toast('保存失败，无法同步', 'err');
+  }
+  toast('正在同步…', 'info');
   await pullGit();
+  await pushGit();
+  await refreshSyncStatus();
 }
 
 // ── Remote management (settings page) ────────────────────────
@@ -769,13 +836,14 @@ async function addRemote() {
   if (!editor.activeDocId) return toast('请先在编辑器中打开一个文档', 'err');
   try {
     const r = await apiFetch('/sync/remote', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId, name: 'remote-' + Date.now().toString(36), url: url }) });
-    if (r) { input.value = ''; toast('远端已添加', 'ok'); renderSetting(); }
+    if (r) { input.value = ''; toast('远端已添加', 'ok'); await refreshSyncStatus(); renderSetting(); }
   } catch (e) { toast('添加失败：' + e.message, 'err'); }
 }
 
 async function removeRemote(name) {
   if (!editor.activeDocId) return;
   await apiFetch('/sync/remote/' + encodeURIComponent(name), { method: 'DELETE', body: JSON.stringify({ doc_id: editor.activeDocId }) });
+  await refreshSyncStatus();
   renderSetting();
 }
 
@@ -1017,8 +1085,18 @@ async function saveGitConfig() {
 
 async function menuRemotes() {
   if (!needDoc()) return;
-  const list = await apiFetch('/sync/remote', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId }) });
+  const status = await apiFetch('/sync/status?doc_id=' + encodeURIComponent(editor.activeDocId));
+  const list = (status && status.remotes) || [];
+  const tr = status && status.tracking;
   const body =
+    (tr ?
+      '<div class="border border-secondary-subtle rounded p-2 mb-3 small">' +
+        '<div class="d-flex align-items-center mb-1"><i class="bi bi-diagram-3 me-1"></i><span class="fw-semibold">' + esc(tr.branch) + '</span>' +
+          (tr.synced ? '<span class="badge text-bg-success ms-1">已同步</span>' :
+           tr.ahead > 0 ? '<span class="badge text-bg-warning ms-1">↑' + tr.ahead + '</span>' :
+           tr.behind > 0 ? '<span class="badge text-bg-info ms-1">↓' + tr.behind + '</span>' : '') + '</div>' +
+        '<div class="text-secondary">' + (tr.remote ? '跟踪 ' + esc(tr.remote) + ' · 本地领先 ' + tr.ahead + ' · 远端领先 ' + tr.behind : '未设置上游分支') + '</div>' +
+      '</div>' : '') +
     '<div class="input-group mb-3">' +
       '<input id="mRemoteUrl" class="form-control form-control-sm" placeholder="http://192.168.1.x:5000">' +
       '<button class="btn btn-primary btn-sm" onclick="modalAddRemote()"><i class="bi bi-plus-lg"></i></button>' +
@@ -1028,6 +1106,8 @@ async function menuRemotes() {
         '<i class="bi bi-router text-secondary"></i>' +
         '<span class="flex-grow-1 text-truncate">' + esc(r.name) + '</span>' +
         '<span class="text-secondary text-truncate" style="max-width:45%">' + esc(r.url) + '</span>' +
+        '<button class="btn btn-sm btn-outline-secondary py-0" title="拉取" onclick="pullFromRemote(\'' + esc(r.name) + '\');closeModal()"><i class="bi bi-cloud-download"></i></button>' +
+        '<button class="btn btn-sm btn-outline-secondary py-0" title="推送" onclick="pushToRemote(\'' + esc(r.name) + '\');closeModal()"><i class="bi bi-cloud-upload"></i></button>' +
         '<button class="btn btn-sm btn-outline-danger py-0" onclick="modalDelRemote(\'' + esc(r.name) + '\')"><i class="bi bi-x-lg"></i></button>' +
       '</div>').join('') : '<div class="text-secondary small">暂无远端设备</div>');
   showModal('配置远程仓库', body);
@@ -1038,12 +1118,14 @@ async function modalAddRemote() {
   if (!url) return;
   await apiFetch('/sync/remote', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId, name: 'remote-' + Date.now().toString(36), url: url }) });
   closeModal();
+  await refreshSyncStatus();
   setTimeout(menuRemotes, 300);
 }
 
 async function modalDelRemote(name) {
   await apiFetch('/sync/remote/' + encodeURIComponent(name), { method: 'DELETE', body: JSON.stringify({ doc_id: editor.activeDocId }) });
   closeModal();
+  await refreshSyncStatus();
   setTimeout(menuRemotes, 300);
 }
 
@@ -1297,6 +1379,15 @@ function renderEditor() {
           '</div>').join('')) +
     '</div>';
 
+  // 同步状态摘要
+  const tr = syncStatus && syncStatus.tracking;
+  const cf = syncStatus ? syncStatus.conflicts : [];
+  const syncBadge = !tr ? '' :
+    (cf.length > 0 ? '<span class="badge text-bg-danger ms-1" title="存在冲突"><i class="bi bi-exclamation-triangle"></i> 冲突</span>' :
+    tr.synced ? '<span class="badge text-bg-success ms-1" title="已与远端同步">已同步</span>' :
+    tr.ahead > 0 ? '<span class="badge text-bg-warning ms-1" title="本地领先 ' + tr.ahead + ' 个提交">↑' + tr.ahead + '</span>' :
+    tr.behind > 0 ? '<span class="badge text-bg-info ms-1" title="远端领先 ' + tr.behind + ' 个提交">↓' + tr.behind + '</span>' : '');
+
   const gitPanel =
     '<div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom border-secondary-subtle">' +
       '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">版本管理 Git</span>' +
@@ -1310,8 +1401,40 @@ function renderEditor() {
       '</div>' +
       '<label class="form-label small text-secondary">提交信息</label>' +
       '<textarea class="form-control form-control-sm mb-2" rows="2" placeholder="描述本次更改..." oninput="commitMsg=this.value">' + esc(commitMsg) + '</textarea>' +
-      '<button class="btn btn-sm btn-outline-success w-100 mb-3" onclick="syncRemote()"><i class="bi bi-arrow-repeat me-1"></i>推送并拉取（同步）</button>' +
-      '<div class="text-uppercase text-secondary mb-1" style="font-size:11px;letter-spacing:1px">最近提交</div>' +
+      '<button class="btn btn-sm btn-outline-success w-100 mb-2" onclick="syncRemote()"><i class="bi bi-arrow-repeat me-1"></i>保存并同步</button>' +
+      '<button class="btn btn-sm btn-outline-secondary w-100 mb-3" onclick="fetchAllRemotes()"><i class="bi bi-arrow-clockwise me-1"></i>获取远端状态</button>' +
+      // 同步状态
+      (tr ?
+        '<div class="border border-secondary-subtle rounded p-2 mb-3 small">' +
+          '<div class="d-flex align-items-center mb-1">' +
+            '<i class="bi bi-diagram-3 me-1"></i><span class="fw-semibold">' + esc(tr.branch) + '</span>' + syncBadge +
+          '</div>' +
+          (tr.remote ?
+            '<div class="text-secondary"><i class="bi bi-link-45deg me-1"></i>跟踪 ' + esc(tr.remote) +
+            ' <span class="ms-1">本地领先 ' + tr.ahead + ' · 远端领先 ' + tr.behind + '</span></div>' :
+            '<div class="text-secondary"><i class="bi bi-dash-circle me-1"></i>未设置上游分支</div>') +
+        '</div>' : '') +
+      // 冲突警告
+      (cf.length > 0 ?
+        '<div class="alert alert-danger py-2 small mb-3">' +
+          '<div class="d-flex align-items-center mb-1"><i class="bi bi-exclamation-triangle me-1"></i><strong>存在 ' + cf.length + ' 个冲突文件</strong></div>' +
+          cf.map(f => '<div class="text-truncate"><i class="bi bi-file-earmark-text me-1"></i>' + esc(f) + '</div>').join('') +
+        '</div>' : '') +
+      // 远端列表
+      '<div class="d-flex justify-content-between align-items-center mb-1">' +
+        '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">远端设备</span>' +
+        '<button class="btn btn-sm btn-outline-secondary py-0" onclick="menuRemotes()"><i class="bi bi-gear"></i> 管理</button>' +
+      '</div>' +
+      (remotes.length === 0 ?
+        '<div class="text-secondary small mb-3">暂无远端，点击"管理"添加</div>' :
+        remotes.map(r =>
+          '<div class="d-flex align-items-center gap-2 py-1 border-bottom border-secondary-subtle small">' +
+            '<i class="bi bi-router text-secondary"></i>' +
+            '<span class="flex-grow-1 text-truncate">' + esc(r.name) + '</span>' +
+            '<button class="btn btn-sm btn-outline-secondary py-0" title="拉取" onclick="pullFromRemote(\'' + esc(r.name) + '\')"><i class="bi bi-cloud-download"></i></button>' +
+            '<button class="btn btn-sm btn-outline-secondary py-0" title="推送" onclick="pushToRemote(\'' + esc(r.name) + '\')"><i class="bi bi-cloud-upload"></i></button>' +
+          '</div>').join('')) +
+      '<div class="text-uppercase text-secondary mb-1 mt-3" style="font-size:11px;letter-spacing:1px">最近提交</div>' +
       (commits.length === 0 ?
         '<div class="text-secondary small">暂无提交记录</div>' :
         commits.map(c =>
@@ -1470,7 +1593,7 @@ function renderEditor() {
       '<span><i class="bi bi-diagram-3 me-1"></i>' + esc(editor.gitBranch || 'main') + '</span>' +
       (editor.fileSha ? '<span><i class="bi bi-hash me-1"></i>' + esc(editor.fileSha.slice(0, 7)) + '</span>' : '') +
        '<span class="d-flex align-items-center' + (editor.unsaved ? '' : ' d-none') + '" id="veUnsavedBar"><span class="ve-unsaved-dot me-1"></span>有未保存更改</span>' +
-      '<span class="ms-auto">VanillaEditor v0.1.3</span>' +
+      '<span class="ms-auto">VanillaEditor v0.2.0</span>' +
       '<span id="veClock">' + new Date().toLocaleTimeString() + '</span>' +
     '</div>';
 
@@ -1690,7 +1813,7 @@ async function renderSetting() {
 
     // status bar
     '<div class="d-flex align-items-center gap-3 px-3 flex-shrink-0 text-white small" style="height:24px;background-color:#0d6efd">' +
-      '<span class="ms-auto">VanillaEditor v0.1.3</span>' +
+      '<span class="ms-auto">VanillaEditor v0.2.0</span>' +
       '<span id="veClock">' + new Date().toLocaleTimeString() + '</span>' +
     '</div>';
 
@@ -1757,11 +1880,29 @@ function renderSettingContent(tab) {
   }
   // network
   if (tab === 'network') {
+    const tr = syncStatus && syncStatus.tracking;
+    const cf = syncStatus ? syncStatus.conflicts : [];
     return '<div class="card">' +
       '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-shield-lock me-1"></i>远程访问控制</div>' +
       '<div class="card-body" id="veAccessControlBody"></div>' +
       '<div class="card-header bg-transparent border-secondary-subtle border-top"><i class="bi bi-hdd-network me-1"></i>同步远端设备</div>' +
       '<div class="card-body">' +
+        (tr ?
+          '<div class="border border-secondary-subtle rounded p-2 mb-3 small">' +
+            '<div class="d-flex align-items-center mb-1"><i class="bi bi-diagram-3 me-1"></i><span class="fw-semibold">' + esc(tr.branch) + '</span>' +
+              (cf.length > 0 ? '<span class="badge text-bg-danger ms-1">冲突</span>' :
+               tr.synced ? '<span class="badge text-bg-success ms-1">已同步</span>' :
+               tr.ahead > 0 ? '<span class="badge text-bg-warning ms-1">↑' + tr.ahead + '</span>' :
+               tr.behind > 0 ? '<span class="badge text-bg-info ms-1">↓' + tr.behind + '</span>' : '') +
+            '</div>' +
+            '<div class="text-secondary">' + (tr.remote ? '跟踪 ' + esc(tr.remote) + ' · 本地领先 ' + tr.ahead + ' · 远端领先 ' + tr.behind : '未设置上游分支') + '</div>' +
+            '<div class="d-flex gap-2 mt-2">' +
+              '<button class="btn btn-sm btn-outline-secondary" onclick="fetchAllRemotes()">获取状态</button>' +
+              '<button class="btn btn-sm btn-outline-secondary" onclick="pullGit()">拉取</button>' +
+              '<button class="btn btn-sm btn-outline-secondary" onclick="pushGit()">推送</button>' +
+              '<button class="btn btn-sm btn-outline-success" onclick="syncRemote()">保存并同步</button>' +
+            '</div>' +
+          '</div>' : '') +
         '<p class="text-secondary small mb-2">将其他设备的 VE 地址添加为 Git 远端，即可端到端同步。当前作用文档：' +
           (editor.activeDocId ? '<span class="badge text-bg-secondary ms-1">' + esc(editor.activeDocId) + '</span>' : '<span class="text-warning ms-1">未选择</span>') +
         '</p>' +
@@ -1823,7 +1964,7 @@ async function loadRemoteListIntoSetting() {
   if (!body) return;
   let remoteList = [];
   if (editor.activeDocId) {
-    try { const r = await apiFetch('/sync/remote', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId }) }); if (r) remoteList = r; } catch (e) {}
+    try { const r = await apiFetch('/sync/status?doc_id=' + encodeURIComponent(editor.activeDocId)); if (r) { remoteList = r.remotes || []; syncStatus = r; } } catch (e) {}
   }
   body.innerHTML = remoteList.length === 0
     ? '<div class="text-secondary small">暂无远端设备</div>'
@@ -1832,6 +1973,9 @@ async function loadRemoteListIntoSetting() {
           '<i class="bi bi-router text-secondary"></i>' +
           '<span class="flex-grow-1 text-truncate">' + esc(r.name) + '</span>' +
           '<span class="text-secondary text-truncate" style="max-width:45%">' + esc(r.url) + '</span>' +
+          (editor.activeDocId ?
+            '<button class="btn btn-sm btn-outline-secondary py-0" title="拉取" onclick="pullFromRemote(\'' + esc(r.name) + '\')"><i class="bi bi-cloud-download"></i></button>' +
+            '<button class="btn btn-sm btn-outline-secondary py-0" title="推送" onclick="pushToRemote(\'' + esc(r.name) + '\')"><i class="bi bi-cloud-upload"></i></button>' : '') +
           '<button class="btn btn-sm btn-outline-danger py-0" title="移除" onclick="removeRemote(\'' + esc(r.name) + '\')"><i class="bi bi-x-lg"></i></button>' +
         '</div>').join('');
 }

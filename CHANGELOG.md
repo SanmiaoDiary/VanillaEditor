@@ -4,13 +4,31 @@ All notable changes to VanillaEditor will be documented in this file.
 
 ---
 
+## [v0.2.0] - 2026-10-18
+
+### Added
+- **同步状态总览**：Git 面板实时显示当前分支、跟踪远端、本地/远端领先提交数、同步状态徽章
+- **按远端推送/拉取**：远端列表中每个远端可单独推送或拉取
+- **获取远端状态**：新增 fetch 操作，先获取远端最新引用再决定推拉
+- **冲突检测与提示**：同步状态中列出未合并的冲突文件并高亮警告
+- **保存并同步**：一键完成"保存本地改动 → 拉取 → 推送 → 刷新状态"
+- **设置页同步面板**：网络与安全页新增同步状态摘要与快捷操作
+- **定期刷新**：编辑器每 10 秒自动刷新同步状态，窗口聚焦时立即刷新
+
+### Fixed
+- **远端列表无法加载**：`loadGitData` 误用 POST 请求列表远端（应为 GET），且 GET 接口未读取 query 参数，导致远端列表始终为空
+- **同步错误提示不友好**：Git 原始报错直接展示，新增 `cleanGitError` 翻译常见错误（non-fast-forward / 无关历史 / 连接失败等）
+- **推送前未保存**：推送前自动保存未提交的本地改动
+
+---
+
 ## [v0.1.3] - 2026-10-18
 
 ### Fixed
 - **光标对齐**：高亮层与 textarea 统一设置 font-family/line-height/letter-spacing/tab-size，消除逐行偏移
 - **回车键失效**：改回 textarea + <pre> 覆盖层方案，解决 contenteditable 空行后 Enter 无反应
 - **中文输入法（IME）冲突**：增加 compositionstart/compositionend 检测，输入拼音期间跳过重渲
-- **工作区按钮样式**：补全 me-1 右边距，图标修正为存在的 i-folder-symlink
+- **工作区按钮样式**：补全 me-1 右边距，图标修正为存在的 bi-folder-symlink
 - **预览面板折叠**：桌面端默认隐藏预览内容但保留面板空间，工具栏新增切换按钮；移除 :empty { display: none } 防止空内容时布局塌陷
 
 ### Added
@@ -29,7 +47,7 @@ All notable changes to VanillaEditor will be documented in this file.
 - **光标对齐**：修复高亮层与编辑区字体/行高不一致导致的光标偏移问题，统一显式设置 `font-family`、`line-height`、`letter-spacing`、`tab-size`
 - **回车键失效**：移除 contenteditable 方案，改回 textarea + 高亮覆盖层，解决空行后 Enter 键无法继续创建新行的问题
 - **中文输入法（IME）冲突**：通过 `compositionstart`/`compositionend` 事件检测组合状态，避免输入拼音时被高亮重渲打断
-- **工作区按钮样式**：修复 `me-1` 间距缺失问题，图标改为有效的 `bi-folder-symlink`
+- **工作区按钮样式**：修复 `me-1` 间距缺失问题，图标改为有效的 `bbi-folder-symlink`
 - **预览面板默认折叠**：电脑端预览面板默认隐藏，工具栏新增切换按钮，按图标可展开/收起
 - **预览面板空间保持**：移除 `.ve-preview:empty { display: none }`，空内容时面板仍保留 100px 高度不塌陷
 
