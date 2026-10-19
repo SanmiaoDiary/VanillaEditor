@@ -31,15 +31,14 @@ let expandedDocs = {};
 let commitMsg = '';
 let remotes = [];
 let commits = [];
-let syncStatus = null; // {tracking, remotes, conflicts, dirty}
+let syncStatus = null;
 let isRegister = false;
 let loginError = '';
 let saveTimer = null;
 let fontSize = parseInt(localStorage.getItem('ve_font_size') || '14', 10);
 let mobilePreviewMode = localStorage.getItem('ve_mobile_preview') === '1';
-let previewVisible = false; // 桌面端预览默认折叠
-let expandedWorkspaces = {}; // 工作区展开/收起状态
-// 已打开的标签页
+let previewVisible = false;
+let expandedWorkspaces = {};
 let openTabs = [];
 let activeTabId = null;
 document.documentElement.style.setProperty('--ed-font-size', fontSize + 'px');
@@ -49,7 +48,6 @@ async function apiFetch(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (auth.token) headers['Authorization'] = 'Bearer ' + auth.token;
   const res = await fetch('/api' + path, { ...opts, headers });
-  // 登录/注册接口的 401 表示密码错误，交给调用方展示错误；其他接口 401 视为登录过期
   const isAuthForm = path === '/auth/login' || path === '/auth/init';
   if (res.status === 401 && !isAuthForm) { auth.logout(); Router.go('#/login'); return null; }
   if (!res.ok) {
@@ -65,16 +63,14 @@ async function apiFetch(path, opts = {}) {
   return res.json();
 }
 
-// 将 Git 原始错误翻译为友好提示
 function cleanGitError(err) {
   if (!err) return '未知错误';
   const e = String(err);
   if (/non-fast-forward/.test(e)) return '远端有新的提交，请先拉取再推送';
-  if (/refusing to merge unrelated histories/.test(e)) return '本地与远端历史无关，需手动处理（可尝试重置或重新打开）';
+  if (/refusing to merge unrelated histories/.test(e)) return '本地与远端历史无关，需手动处理';
   if (/could not read from remote repository|Permission denied \(publickey\)|Could not resolve hostname/.test(e)) return '无法连接远端仓库，请检查地址与网络';
   if (/Already up to date/.test(e)) return '已是最新';
   if (/CONFLICT/.test(e)) return '合并冲突，请手动解决';
-  // 只取第一行有意义的信息
   const line = e.split('\n').find(l => l.trim() && !l.startsWith('hint:') && !l.startsWith('error: failed to push'));
   return line ? line.replace(/^fatal:\s*/, '').trim() : '同步失败';
 }
@@ -126,19 +122,15 @@ function parseMd(src) {
     }
     return { html: html + '</' + tag + '>', next: i };
   };
-
   const lines = src.replace(/\r\n?/g, '\n').split('\n');
   const listRe = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
   const isBlockStart = l =>
     /^\s*$/.test(l) || /^(#{1,6})\s+/.test(l) || /^```/.test(l) || /^\s*>/.test(l) ||
     listRe.test(l) || (/^\s*\|.*\|\s*$/.test(l)) ||
     /^\s*([-*_])\s*(\1\s*){2,}$/.test(l);
-
   let html = '', i = 0;
   while (i < lines.length) {
     const line = lines[i];
-
-    // 代码块 ```lang ... ```
     const fence = line.match(/^```(\S*)\s*$/);
     if (fence) {
       const buf = [];
@@ -148,25 +140,16 @@ function parseMd(src) {
       html += '<pre><code>' + esc(buf.join('\n')) + '</code></pre>';
       continue;
     }
-
     if (/^\s*$/.test(line)) { i++; continue; }
-
-    // 标题
     const h = line.match(/^(#{1,6})\s+(.*)$/);
     if (h) { html += '<h' + h[1].length + '>' + inline(esc(h[2])) + '</h' + h[1].length + '>'; i++; continue; }
-
-    // 分割线
     if (/^\s*([-*_])\s*(\1\s*){2,}$/.test(line)) { html += '<hr>'; i++; continue; }
-
-    // 引用块
     if (/^\s*>/.test(line)) {
       const buf = [];
       while (i < lines.length && /^\s*>/.test(lines[i])) { buf.push(lines[i].replace(/^\s*>\s?/, '')); i++; }
       html += '<blockquote>' + parseMd(buf.join('\n')) + '</blockquote>';
       continue;
     }
-
-    // 表格
     if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
       const cells = r => r.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
       const head = cells(line);
@@ -179,8 +162,6 @@ function parseMd(src) {
       html += '</tbody></table>';
       continue;
     }
-
-    // 列表（支持 - * + 与数字序号、缩进嵌套）
     const lm = line.match(listRe);
     if (lm) {
       const items = [];
@@ -193,8 +174,6 @@ function parseMd(src) {
       html += renderList(items, 0, items[0].indent).html;
       continue;
     }
-
-    // 段落
     const buf = [line];
     i++;
     while (i < lines.length && !isBlockStart(lines[i])) { buf.push(lines[i]); i++; }
@@ -207,11 +186,6 @@ function esc(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// ── Markdown syntax highlighter ──────────────────────────────
-// 行内语法着色：把 #、**、*、-、> 等标记字符单独包裹 <span class="hl-mk"> 蓝色高亮，
-// ── Markdown syntax highlighter ──────────────────────────────
-// 输出 <pre> 内容：每行用 \n 分隔，行内语法标记用 <span> 着色。
-// <pre> 与 textarea 共享相同字体/行高/内边距，光标位置天然对齐。
 function hlMd(src) {
   if (!src) return '';
   const escH = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -232,20 +206,16 @@ function hlMd(src) {
   const lines = src.replace(/\r\n?/g, '\n').split('\n');
   return lines.map(line => {
     const esc = escH(line);
-    // 行首 # 标题标记
     const hm = esc.match(/^(#{1,6}\s)(.*)$/);
     if (hm) return '<span class="hl-mk">' + hm[1] + '</span>' + inl(hm[2]);
-    // 行首 > 引用标记
     const bq = esc.match(/^(&gt;\s?)(.*)$/);
     if (bq) return '<span class="hl-mk">' + bq[1] + '</span>' + inl(bq[2]);
-    // 行首 - * + 列表或数字. 列表
     const lm = esc.match(/^(\s*[-*+] |\s*\d+\.)\s+(.*)$/);
     if (lm) return '<span class="hl-mk">' + lm[1] + '</span>' + inl(lm[2]);
     return inl(esc);
   }).join('\n');
 }
 
-// 渲染高亮层 + 行号
 function renderHighlight(content) {
   const hlEl = document.getElementById('veHighlight');
   const lnEl = document.getElementById('veLnNums');
@@ -258,28 +228,37 @@ function renderHighlight(content) {
   lnEl.textContent = lnHtml;
 }
 
+// ── Preview toggle ───────────────────────────────────────────
 function togglePreview() {
   previewVisible = !previewVisible;
-  // 桌面端：预览面板与分割条一起显示/隐藏，让编辑区占满宽度
   const pr = document.getElementById('vePreview');
   const resizer = document.getElementById('veSplitResizer');
   const btn = document.getElementById('vePreviewToggleDesktop');
   if (pr) {
     if (previewVisible) {
+      if (!resizer) {
+        const split = document.querySelector('.ve-split');
+        if (split) {
+          const r = document.createElement('div');
+          r.className = 've-resizer ve-resizer-v d-none d-md-block';
+          r.id = 'veSplitResizer';
+          r.title = '拖动调整编辑/预览宽度';
+          split.insertBefore(r, pr);
+          r.onpointerdown = e => startResize(e, 'split');
+        }
+      }
       pr.classList.remove('d-none');
       pr.style.display = '';
-      if (resizer) resizer.classList.remove('ve-resizer-hidden');
       if (btn) btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
     } else {
+      if (resizer) resizer.remove();
       pr.classList.add('d-none');
       pr.style.display = 'none';
-      if (resizer) resizer.classList.add('ve-resizer-hidden');
       if (btn) btn.innerHTML = '<i class="bi bi-eye"></i>';
     }
   }
 }
 
-// ── Clock (只更新文本，避免整页重绘) ──────────────────────────
 setInterval(() => {
   const c = document.getElementById('veClock');
   if (c) c.textContent = new Date().toLocaleTimeString();
@@ -394,19 +373,11 @@ async function closeWorkspace(docId) {
   } catch (e) { toast('关闭失败：' + e.message, 'err'); }
 }
 
-async function scanDirectory(path) {
-  if (!path) return [];
-  try {
-    const r = await apiFetch('/workspaces/scan', { method: 'POST', body: JSON.stringify({ path }) });
-    return r && r.files ? r.files : [];
-  } catch (e) { return []; }
-}
-
 let wsBrowsePath = '';
-let wsFileCache = {}; // docId -> files[]
-let wsHistory = [];   // path history stack
+let wsFileCache = {};
+let wsHistory = [];
 let wsHistoryIdx = -1;
-let wsDefaultRoot = ''; // 默认工作区根目录
+let wsDefaultRoot = '';
 
 async function openWorkspaceModal() {
   const data = await apiFetch('/workspaces');
@@ -437,35 +408,40 @@ async function openWorkspaceModal() {
 }
 
 async function renderWorkspaceDialog() {
-  const modalBody = document.getElementById('wsDialogBody');
-  const pathDisplay = document.getElementById('wsPathDisplay');
-  if (!modalBody) return;
-  if (pathDisplay) pathDisplay.value = wsBrowsePath;
-
-  // 加载当前目录内容
-  const r = await apiFetch('/fs/children', { method: 'POST', body: JSON.stringify({ path: wsBrowsePath }) });
   const container = document.getElementById('wsDirList');
   if (!container) return;
-  if (!r || !r.dirs && !r.files) {
+  const r = await apiFetch('/fs/children', { method: 'POST', body: JSON.stringify({ path: wsBrowsePath }) });
+  if (!r || (!r.dirs && !r.files)) {
     container.innerHTML = '<div class="text-secondary small p-3">无法读取目录内容</div>';
     return;
   }
   let html = '';
-  // 子目录
   (r.dirs || []).forEach(d => {
     html += '<div class="ve-ws-item py-2 px-3 border-bottom border-secondary-subtle cursor-pointer" onclick="wsOpenDir(\'' + esc(d.path) + '\')">' +
       '<i class="bi bi-folder2 me-2 text-warning"></i>' + esc(d.name) + '</div>';
   });
-  // 文件（只读，不可选为工作区）
-  (r.files || []).slice(0, 50).forEach(f => {
+  (r.files || []).slice(0, 80).forEach(f => {
     html += '<div class="ve-ws-item py-1 px-3 border-bottom border-secondary-subtle text-secondary small">' +
       '<i class="bi bi-file-earmark me-2"></i>' + esc(f.name) +
       '<span class="ms-2">' + formatSize(f.size) + '</span></div>';
   });
-  if ((r.files || []).length > 50) {
-    html += '<div class="px-3 py-2 text-secondary small">… 还有 ' + ((r.files.length || 0) - 50) + ' 个文件</div>';
+  if ((r.files || []).length > 80) {
+    html += '<div class="px-3 py-2 text-secondary small">… 还有 ' + ((r.files.length || 0) - 80) + ' 个文件</div>';
   }
   container.innerHTML = html || '<div class="text-secondary small p-3">该目录为空</div>';
+  // 更新按钮状态
+  const isAtDefault = wsBrowsePath === wsDefaultRoot || wsBrowsePath === '/';
+  const canGoParent = !isAtDefault;
+  const canGoBack = wsHistoryIdx > 0;
+  const canGoNext = wsHistoryIdx < wsHistory.length - 1;
+  const inp = document.getElementById('wsPathInput');
+  if (inp) inp.value = wsBrowsePath;
+  const btnParent = document.getElementById('wsBtnParent');
+  if (btnParent) btnParent.disabled = !canGoParent;
+  const btnNext = document.getElementById('wsBtnNext');
+  if (btnNext) btnNext.disabled = !canGoNext;
+  const btnBack = document.getElementById('wsBtnBack');
+  if (btnBack) btnBack.disabled = !canGoBack;
 }
 
 function formatSize(bytes) {
@@ -502,13 +478,10 @@ function wsGoBack() {
     renderWorkspaceDialog();
   }
 }
-function wsOpenDir(path) {
-  wsNavigateTo(path);
-}
+function wsOpenDir(path) { wsNavigateTo(path); }
 function wsNavigateTo(path) {
   path = path.replace(/\\/g, '/');
   if (wsBrowsePath !== path) {
-    // 剪掉当前路径之后的历史
     wsHistory = wsHistory.slice(0, wsHistoryIdx + 1);
     wsHistory.push(path);
     wsHistoryIdx = wsHistory.length - 1;
@@ -524,80 +497,30 @@ async function confirmOpenWorkspace() {
   await openWorkspace(path);
 }
 
-async function renderWorkspaceDialog() {
-  // 异步加载目录列表，不阻塞按钮状态更新
-  const isAtDefault = wsBrowsePath === wsDefaultRoot || wsBrowsePath === '/';
-  const canGoParent = !isAtDefault;
-  const canGoBack = wsHistoryIdx > 0;
-  const canGoNext = wsHistoryIdx < wsHistory.length - 1;
-
-  const inp = document.getElementById('wsPathInput');
-  if (inp) inp.value = wsBrowsePath;
-  const btnParent = document.getElementById('wsBtnParent');
-  if (btnParent) btnParent.disabled = !canGoParent;
-  const btnNext = document.getElementById('wsBtnNext');
-  if (btnNext) btnNext.disabled = !canGoNext;
-  const btnBack = document.getElementById('wsBtnBack');
-  if (btnBack) btnBack.disabled = !canGoBack;
-
-  const container = document.getElementById('wsDirList');
-  if (!container) return;
-  const r = await apiFetch('/fs/children', { method: 'POST', body: JSON.stringify({ path: wsBrowsePath }) });
-  if (!r || (!r.dirs && !r.files)) {
-    container.innerHTML = '<div class="text-secondary small p-3">无法读取目录内容</div>';
-    return;
-  }
-  let html = '';
-  if (!isAtDefault) {
-    html += '<div class="ve-ws-item py-2 px-3 border-bottom border-secondary-subtle cursor-pointer text-secondary" onclick="wsGoParent()">' +
-      '<i class="bi bi-arrow-return-left me-2"></i>.. 返回上级</div>';
-  }
-  html += '<div class="ve-ws-item py-2 px-3 border-bottom border-secondary-subtle cursor-pointer text-primary" onclick="wsGoDefault()">' +
-    '<i class="bi bi-house me-2"></i>默认工作区</div>';
-  (r.dirs || []).forEach(d => {
-    html += '<div class="ve-ws-item py-2 px-3 border-bottom border-secondary-subtle cursor-pointer" onclick="wsOpenDir(\'' + esc(d.path) + '\')">' +
-      '<i class="bi bi-folder2 me-2 text-warning"></i>' + esc(d.name) + '</div>';
-  });
-  (r.files || []).slice(0, 80).forEach(f => {
-    html += '<div class="ve-ws-item py-1 px-3 border-bottom border-secondary-subtle text-secondary small">' +
-      '<i class="bi bi-file-earmark me-2"></i>' + esc(f.name) +
-      '<span class="ms-2">' + formatSize(f.size) + '</span></div>';
-  });
-  if ((r.files || []).length > 80) {
-    html += '<div class="px-3 py-2 text-secondary small">… 还有 ' + ((r.files.length || 0) - 80) + ' 个文件</div>';
-  }
-  container.innerHTML = html || '<div class="text-secondary small p-3">该目录为空</div>';
-}
-
 async function selectWorkspace(docId) {
   editor.activeDocId = docId;
   editor.activeFilePath = '';
   editor.content = '';
   editor.unsaved = false;
   await loadGitData();
-  // 缓存工作区文件列表
   if (!wsFileCache[docId]) {
-    try {
-      wsFileCache[docId] = (await apiFetch('/files/' + docId)) || [];
-    } catch (e) { wsFileCache[docId] = []; }
+    try { wsFileCache[docId] = (await apiFetch('/files/' + docId)) || []; } catch (e) { wsFileCache[docId] = []; }
   }
   renderEditor();
 }
 
-// 工作区折叠/展开
 function toggleWorkspace(docId) {
   expandedWorkspaces[docId] = !expandedWorkspaces[docId];
   if (expandedWorkspaces[docId] && !wsFileCache[docId]) {
     apiFetch('/files/' + docId).then(files => {
       wsFileCache[docId] = files || [];
-      renderEditor();
+      if (expandedWorkspaces[docId]) renderEditor();
     }).catch(() => { wsFileCache[docId] = []; });
   }
   editor.activeDocId = docId;
   renderEditor();
 }
 
-// 从服务器拉取最新文档列表，有变化时自动刷新侧边栏（其他设备删除/新增也会同步显示）
 async function refreshSidebar() {
   if (!auth.isLoggedIn || location.hash !== '#/editor') return;
   let data;
@@ -605,24 +528,20 @@ async function refreshSidebar() {
   if (!data) return;
   const j = JSON.stringify(data);
   if (j === lastDocsJson) {
-    // 仅刷新工作区（docs 无变化时仍更新 workspace 列表）
     await loadWorkspaces();
     return;
   }
   sidebarDocs = data;
   lastDocsJson = j;
-  // 清空已删除工作区的缓存
   wsFileCache = {};
   for (const ws of workspaces) {
     try { wsFileCache[ws.id] = (await apiFetch('/files/' + ws.id)) || []; } catch (e) {}
   }
-  // 当前正在输入或有弹窗打开时不重绘，避免打断操作
   const ae = document.activeElement;
   const typing = ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT');
   const modalOpen = !!document.querySelector('.modal.show');
   const ocOpen = !!document.querySelector('.offcanvas.show');
   if (typing || modalOpen || ocOpen) return;
-  // 当前打开的文档/文件若已在服务端被删除，清空编辑区
   if (editor.activeDocId) {
     const doc = data.find(d => d.id === editor.activeDocId);
     if (!doc) {
@@ -635,7 +554,6 @@ async function refreshSidebar() {
 }
 setInterval(refreshSidebar, 4000);
 window.addEventListener('focus', refreshSidebar);
-// 定期刷新同步状态（不触发整页重绘）
 setInterval(() => { if (auth.isLoggedIn && location.hash === '#/editor') loadSyncStatus(); }, 10000);
 window.addEventListener('focus', () => { if (auth.isLoggedIn) loadSyncStatus(); });
 
@@ -648,10 +566,9 @@ async function openFile(docId, filePath) {
     editor.fileSha = r.sha;
     editor.unsaved = false;
   }
-  // 将文件加入标签页列表（如已存在则移到最前）
   const tabId = docId + '::' + filePath;
   openTabs = openTabs.filter(t => t.id !== tabId);
-  openTabs.unshift({ id: tabId, docId, filePath, label: filePath.split('/').pop(), unsaved: false });
+  openTabs.unshift({ id: tabId, docId, filePath, label: filePath.split('/').pop(), content: r ? r.content : '', unsaved: false, scrollPos: 0 });
   activeTabId = tabId;
   if (location.hash !== '#/editor') { Router.go('#/editor'); return; }
   renderEditor();
@@ -661,6 +578,12 @@ function closeTab(tabId) {
   const idx = openTabs.findIndex(t => t.id === tabId);
   if (idx === -1) return;
   const wasActive = tabId === activeTabId;
+  const closingTab = openTabs[idx];
+  if (closingTab) {
+    closingTab.content = editor.content;
+    const ta = document.getElementById('veEditor');
+    if (ta) closingTab.scrollPos = ta.scrollTop;
+  }
   openTabs.splice(idx, 1);
   if (wasActive) {
     if (openTabs.length > 0) {
@@ -671,10 +594,7 @@ function closeTab(tabId) {
       editor.content = t.content || '';
       editor.unsaved = false;
     } else {
-      editor.activeDocId = '';
-      editor.activeFilePath = '';
-      editor.content = '';
-      editor.unsaved = false;
+      editor.activeDocId = ''; editor.activeFilePath = ''; editor.content = ''; editor.unsaved = false;
     }
   }
   renderEditor();
@@ -682,9 +602,12 @@ function closeTab(tabId) {
 
 function switchTab(tabId) {
   if (tabId === activeTabId) return;
-  // 切换前先保存当前标签的内容
   const cur = openTabs.find(t => t.id === activeTabId);
-  if (cur) cur.content = editor.content;
+  if (cur) {
+    cur.content = editor.content;
+    const ta = document.getElementById('veEditor');
+    if (ta) cur.scrollPos = ta.scrollTop;
+  }
   const idx = openTabs.findIndex(t => t.id === tabId);
   if (idx === -1) return;
   activeTabId = tabId;
@@ -692,8 +615,14 @@ function switchTab(tabId) {
   editor.activeDocId = t.docId;
   editor.activeFilePath = t.filePath;
   editor.content = t.content || '';
-  editor.unsaved = t.unsaved;
+  editor.unsaved = t.unsaved || false;
   renderEditor();
+  if (t.scrollPos != null && t.scrollPos > 0) {
+    setTimeout(() => {
+      const ta = document.getElementById('veEditor');
+      if (ta) ta.scrollTop = t.scrollPos;
+    }, 50);
+  }
 }
 
 async function createFolder() {
@@ -734,7 +663,6 @@ async function deleteDoc(docId) {
     return;
   }
   delete expandedDocs[docId];
-  // 移除相关标签页
   openTabs = openTabs.filter(t => t.docId !== docId);
   if (editor.activeDocId === docId) {
     editor.activeDocId = ''; editor.activeFilePath = ''; editor.content = ''; editor.unsaved = false;
@@ -752,15 +680,11 @@ async function loadGitData() {
   await loadSyncStatus();
 }
 
-// 加载同步状态（分支跟踪、远端、冲突）
 async function loadSyncStatus() {
   if (!editor.activeDocId) return;
   try {
     const r = await apiFetch('/sync/status?doc_id=' + encodeURIComponent(editor.activeDocId));
-    if (r) {
-      syncStatus = r;
-      remotes = r.remotes || [];
-    }
+    if (r) { syncStatus = r; remotes = r.remotes || []; }
   } catch (e) { syncStatus = null; }
 }
 
@@ -815,7 +739,6 @@ async function commitGit() {
   else toast('提交失败', 'err');
 }
 
-// 完整同步：先保存本地改动 → 拉取 → 推送 → 刷新状态
 async function syncRemote() {
   if (!editor.activeDocId) return toast('请先选择文档', 'err');
   if (editor.unsaved) {
@@ -828,7 +751,6 @@ async function syncRemote() {
   await refreshSyncStatus();
 }
 
-// ── Remote management (settings page) ────────────────────────
 async function addRemote() {
   const input = document.getElementById('newRemoteUrl');
   const url = input.value.trim();
@@ -851,7 +773,6 @@ async function removeRemote(name) {
 function setPanel(panel) {
   activePanel = panel;
   renderEditor();
-  // 移动端点击面板按钮时自动展开侧边栏
   if (window.innerWidth < 992) {
     const el = document.getElementById('veSidebar');
     if (el && !el.classList.contains('show')) {
@@ -865,9 +786,7 @@ function setPanel(panel) {
   }
 }
 
-// 用事件委托管理 offcanvas，避免 DOM 重建后 Bootstrap 实例失效
 function initOffcanvasDelegate() {
-  // 关闭按钮：移除 show 类，隐藏 backdrop
   document.addEventListener('click', e => {
     if (!e.target.closest('#veSidebarClose')) return;
     const el = document.getElementById('veSidebar');
@@ -877,7 +796,6 @@ function initOffcanvasDelegate() {
       document.body.classList.remove('modal-open');
     }
   });
-  // 触发按钮：手动控制开/关
   document.addEventListener('click', e => {
     if (!e.target.closest('#veSidebarToggler')) return;
     e.preventDefault();
@@ -897,10 +815,8 @@ function initOffcanvasDelegate() {
     }
   });
 }
-// 页面加载后只初始化一次
 initOffcanvasDelegate();
 
-// 菜单 offcanvas（编辑器和设置页共用同一套开/关逻辑）
 function closeMenuOffcanvas() {
   ['veMenuOffcanvas', 'veSettingsMenuOffcanvas'].forEach(id => {
     const el = document.getElementById(id);
@@ -911,7 +827,6 @@ function closeMenuOffcanvas() {
 }
 
 document.addEventListener('click', e => {
-  // 编辑器页菜单触发 / 关闭
   if (e.target.closest('#veMenuToggler')) {
     e.preventDefault();
     const el = document.getElementById('veMenuOffcanvas');
@@ -930,11 +845,7 @@ document.addEventListener('click', e => {
     }
     return;
   }
-  if (e.target.closest('#veMenuClose')) {
-    closeMenuOffcanvas();
-    return;
-  }
-  // 设置页菜单触发 / 关闭
+  if (e.target.closest('#veMenuClose')) { closeMenuOffcanvas(); return; }
   if (e.target.closest('#veSettingsToggler')) {
     e.preventDefault();
     const el = document.getElementById('veSettingsMenuOffcanvas');
@@ -953,10 +864,7 @@ document.addEventListener('click', e => {
     }
     return;
   }
-  if (e.target.closest('#veSettingsMenuClose')) {
-    closeMenuOffcanvas();
-    return;
-  }
+  if (e.target.closest('#veSettingsMenuClose')) { closeMenuOffcanvas(); return; }
 });
 
 function toggleDoc(docId) {
@@ -969,7 +877,6 @@ function logout() {
   Router.go('#/login');
 }
 
-// ── Modal helper ─────────────────────────────────────────────
 function showModal(title, body, footer) {
   closeModal();
   const el = document.createElement('div');
@@ -995,7 +902,6 @@ function closeModal() {
   if (el) { const m = bootstrap.Modal.getInstance(el); if (m) m.hide(); }
 }
 
-// ── 文件菜单：打开 / 导入 / 保存 / 另存为 ─────────────────────
 function menuOpen() {
   if (sidebarDocs.length === 0) return showModal('打开文档', '<div class="text-secondary small">暂无文档，请先新建或导入</div>');
   const body = sidebarDocs.map(doc =>
@@ -1008,10 +914,7 @@ function menuOpen() {
   showModal('打开文档', body);
 }
 
-function modalOpenFile(docId, path) {
-  closeModal();
-  openFile(docId, path);
-}
+function modalOpenFile(docId, path) { closeModal(); openFile(docId, path); }
 
 function menuImport() {
   const inp = document.createElement('input');
@@ -1038,7 +941,10 @@ async function saveNow() {
   });
   if (r) {
     editor.unsaved = false;
-    document.querySelectorAll('.ve-unsaved-dot').forEach(el => el.classList.add('d-none'));
+    const t = openTabs.find(t => t.id === activeTabId);
+    if (t) t.unsaved = false;
+    const activeDot = document.querySelector('.ve-tab.on .ve-unsaved-dot');
+    if (activeDot) activeDot.classList.add('d-none');
     const ub = document.getElementById('veUnsavedBar');
     if (ub) ub.classList.add('d-none');
     toast('已保存', 'ok');
@@ -1056,7 +962,6 @@ async function menuSaveAs() {
   }
 }
 
-// ── Git 菜单 ─────────────────────────────────────────────────
 function needDoc() {
   if (!editor.activeDocId) { toast('请先打开一个文档', 'err'); return false; }
   return true;
@@ -1228,7 +1133,7 @@ async function resetTo(sha) {
   } else toast('回退失败：' + (r ? r.error : ''), 'err');
 }
 
-// ── 可拖拽布局 ───────────────────────────────────────────────
+// ── Layout ───────────────────────────────────────────────────
 const layout = {
   sidebarW: parseInt(localStorage.getItem('ve_sidebar_w') || '280', 10),
   editorPct: parseInt(localStorage.getItem('ve_editor_pct') || '50', 10)
@@ -1312,14 +1217,43 @@ function applyMobilePreviewState() {
       pr.classList.add('d-none');
       pr.style.display = '';
     }
-    if (btn) {
-      btn.innerHTML = '<i class="bi bi-' + (mobilePreviewMode ? 'pencil' : 'eye') + '"></i>' + (mobilePreviewMode ? ' 编辑' : ' 预览');
-    }
+    if (btn) btn.innerHTML = '<i class="bi bi-' + (mobilePreviewMode ? 'pencil' : 'eye') + '"></i>' + (mobilePreviewMode ? ' 编辑' : ' 预览');
   } else {
-    // 桌面端：始终重建 HTML，由 previewVisible 决定预览是否显示
     ep.classList.remove('d-none');
   }
 }
+
+// ── Tab state persistence ────────────────────────────────────
+function saveTabState() {
+  try {
+    const state = {
+      tabs: openTabs.map(t => ({ id: t.id, docId: t.docId, filePath: t.filePath, label: t.label, unsaved: t.unsaved, scrollPos: t.scrollPos || 0 })),
+      activeTabId: activeTabId
+    };
+    localStorage.setItem('ve_tab_state', JSON.stringify(state));
+  } catch (e) {}
+}
+
+function restoreTabState() {
+  try {
+    const raw = localStorage.getItem('ve_tab_state');
+    if (!raw) return false;
+    const state = JSON.parse(raw);
+    if (!state.tabs || state.tabs.length === 0) return false;
+    openTabs = state.tabs;
+    activeTabId = state.activeTabId;
+    if (openTabs.length > 0) {
+      const first = openTabs.find(t => t.id === activeTabId) || openTabs[0];
+      editor.activeDocId = first.docId;
+      editor.activeFilePath = first.filePath;
+      editor.content = first.content || '';
+      editor.unsaved = first.unsaved || false;
+    }
+    return true;
+  } catch (e) { return false; }
+}
+
+window.addEventListener('beforeunload', saveTabState);
 
 // ── Editor page ──────────────────────────────────────────────
 function renderEditor() {
@@ -1337,12 +1271,13 @@ function renderEditor() {
       '</span>' +
     '</div>' +
     '<div class="ve-scroll py-1">' +
-       // 工作区列表（按 id 去重）
-        (workspaces.length > 0 ?
+       (workspaces.length > 0 ?
           '<div class="px-3 py-2 border-bottom border-secondary-subtle">' +
             '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">工作区</span>' +
           '</div>' +
-          workspaces.filter((ws, i, arr) => arr.findIndex(x => x.id === ws.id) === i).map(ws => {
+          workspaces.filter((ws, i, arr) => {
+            return arr.findIndex(x => x.id === ws.id || (x.source_path && x.source_path === ws.source_path)) === i;
+          }).map(ws => {
             const wsFiles = wsFileCache[ws.id] || [];
             const isActive = editor.activeDocId === ws.id;
             const expanded = !!expandedWorkspaces[ws.id];
@@ -1363,23 +1298,22 @@ function renderEditor() {
           '<div class="px-3 py-2 text-secondary small">点击右上角 <i class="bi bi-folder-open"></i> 按钮打开工作区</div>') +
         (workspaces.length > 0 ? '<hr class="my-1">' : '') +
        (sidebarDocs.filter(d => !workspaces.some(w => w.id === d.id)).length === 0 ?
-         '<div class="px-3 py-2 text-secondary small">暂无文档，点击右上角新建</div>' :
-         sidebarDocs.filter(d => !workspaces.some(w => w.id === d.id)).map(doc =>
-           '<div>' +
-             '<div class="ve-tree-item" onclick="toggleDoc(\'' + esc(doc.id) + '\')">' +
-               '<i class="bi ' + (expandedDocs[doc.id] ? 'bi-folder2-open' : 'bi-folder') + '"></i>' +
-               '<span class="nm">' + esc(doc.name) + '</span>' +
-               '<span class="text-secondary small">' + (doc.file_count || 0) + '</span>' +
-             '</div>' +
-             (expandedDocs[doc.id] && doc.children ? doc.children.map(f =>
-              '<div class="ve-tree-item ps-4' + (editor.activeDocId === doc.id && editor.activeFilePath === f.path ? ' on' : '') + '" onclick="openFile(\'' + esc(doc.id) + '\',\'' + esc(f.path) + '\')">' +
-                '<i class="bi ' + (f.path.endsWith('.md') ? 'bi-file-earmark-text' : 'bi-file-earmark') + '"></i>' +
-                '<span class="nm">' + esc(f.path.split('/').pop()) + '</span>' +
-              '</div>').join('') : '') +
+          '<div class="px-3 py-2 text-secondary small">暂无文档，点击右上角新建</div>' :
+          sidebarDocs.filter(d => !workspaces.some(w => w.id === d.id)).map(doc =>
+            '<div>' +
+              '<div class="ve-tree-item" onclick="toggleDoc(\'' + esc(doc.id) + '\')">' +
+                '<i class="bi ' + (expandedDocs[doc.id] ? 'bi-folder2-open' : 'bi-folder') + '"></i>' +
+                '<span class="nm">' + esc(doc.name) + '</span>' +
+                '<span class="text-secondary small">' + (doc.file_count || 0) + '</span>' +
+              '</div>' +
+              (expandedDocs[doc.id] && doc.children ? doc.children.map(f =>
+               '<div class="ve-tree-item ps-4' + (editor.activeDocId === doc.id && editor.activeFilePath === f.path ? ' on' : '') + '" onclick="openFile(\'' + esc(doc.id) + '\',\'' + esc(f.path) + '\')">' +
+                 '<i class="bi ' + (f.path.endsWith('.md') ? 'bi-file-earmark-text' : 'bi-file-earmark') + '"></i>' +
+                 '<span class="nm">' + esc(f.path.split('/').pop()) + '</span>' +
+               '</div>').join('') : '') +
           '</div>').join('')) +
     '</div>';
 
-  // 同步状态摘要
   const tr = syncStatus && syncStatus.tracking;
   const cf = syncStatus ? syncStatus.conflicts : [];
   const syncBadge = !tr ? '' :
@@ -1403,7 +1337,6 @@ function renderEditor() {
       '<textarea class="form-control form-control-sm mb-2" rows="2" placeholder="描述本次更改..." oninput="commitMsg=this.value">' + esc(commitMsg) + '</textarea>' +
       '<button class="btn btn-sm btn-outline-success w-100 mb-2" onclick="syncRemote()"><i class="bi bi-arrow-repeat me-1"></i>保存并同步</button>' +
       '<button class="btn btn-sm btn-outline-secondary w-100 mb-3" onclick="fetchAllRemotes()"><i class="bi bi-arrow-clockwise me-1"></i>获取远端状态</button>' +
-      // 同步状态
       (tr ?
         '<div class="border border-secondary-subtle rounded p-2 mb-3 small">' +
           '<div class="d-flex align-items-center mb-1">' +
@@ -1414,13 +1347,11 @@ function renderEditor() {
             ' <span class="ms-1">本地领先 ' + tr.ahead + ' · 远端领先 ' + tr.behind + '</span></div>' :
             '<div class="text-secondary"><i class="bi bi-dash-circle me-1"></i>未设置上游分支</div>') +
         '</div>' : '') +
-      // 冲突警告
       (cf.length > 0 ?
         '<div class="alert alert-danger py-2 small mb-3">' +
           '<div class="d-flex align-items-center mb-1"><i class="bi bi-exclamation-triangle me-1"></i><strong>存在 ' + cf.length + ' 个冲突文件</strong></div>' +
           cf.map(f => '<div class="text-truncate"><i class="bi bi-file-earmark-text me-1"></i>' + esc(f) + '</div>').join('') +
         '</div>' : '') +
-      // 远端列表
       '<div class="d-flex justify-content-between align-items-center mb-1">' +
         '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">远端设备</span>' +
         '<button class="btn btn-sm btn-outline-secondary py-0" onclick="menuRemotes()"><i class="bi bi-gear"></i> 管理</button>' +
@@ -1446,7 +1377,6 @@ function renderEditor() {
     '</div>';
 
   app.innerHTML =
-    // top navbar
     '<nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom border-secondary-subtle px-2 py-1 flex-shrink-0">' +
       '<div class="container-fluid">' +
         '<a class="navbar-brand ve-brand mb-0" href="#/editor"><i class="bi bi-journal-richtext me-1"></i><span class="ve-logo-text">VanillaEditor</span></a>' +
@@ -1493,8 +1423,6 @@ function renderEditor() {
         '</div>' +
       '</div>' +
     '</nav>' +
-
-    // left-side menu offcanvas (mobile only)
     '<div class="offcanvas offcanvas-start d-lg-none" tabindex="-1" id="veMenuOffcanvas" aria-labelledby="veMenuOffcanvasLabel">' +
       '<div class="offcanvas-header border-bottom border-secondary-subtle">' +
         '<h6 class="offcanvas-title text-uppercase text-secondary" id="veMenuOffcanvasLabel" style="font-size:11px;letter-spacing:1px">菜单</h6>' +
@@ -1522,9 +1450,7 @@ function renderEditor() {
         '</ul>' +
       '</div>' +
     '</div>' +
-
     '<div class="d-flex flex-grow-1 overflow-hidden">' +
-      // sidebar (offcanvas below lg)
       '<aside class="offcanvas-lg offcanvas-start border-end border-secondary-subtle ve-sidebar" tabindex="-1" id="veSidebar" aria-labelledby="veSidebarLabel">' +
         '<div class="offcanvas-header d-lg-none py-1 border-bottom border-secondary-subtle">' +
           '<span class="text-uppercase text-secondary" id="veSidebarLabel" style="font-size:11px">' + (activePanel === 'git' ? 'Git' : '资源管理器') + '</span>' +
@@ -1539,8 +1465,6 @@ function renderEditor() {
         '</div>' +
       '</aside>' +
       '<div class="ve-resizer ve-resizer-v d-none d-lg-block" id="veSidebarResizer" title="拖动调整侧边栏宽度"></div>' +
-
-      // main area
       '<main class="flex-grow-1 d-flex flex-column overflow-hidden">' +
         '<div class="d-flex align-items-center gap-2 px-3 py-1 bg-body-tertiary border-bottom border-secondary-subtle flex-shrink-0">' +
           '<button class="btn btn-sm btn-outline-secondary py-0 d-lg-none" onclick="setPanel(\'files\')" title="文件列表"><i class="bi bi-list"></i></button>' +
@@ -1555,14 +1479,13 @@ function renderEditor() {
             '</button>' +
           '</span>' +
         '</div>' +
-        // 标签栏
         '<div class="d-flex align-items-end border-bottom flex-shrink-0 ve-tabs" style="overflow-x:auto;background:var(--bs-body-bg)">' +
           (openTabs.length === 0 ?
             '<div class="text-secondary small px-2 py-1">未打开文件</div>' :
             openTabs.map(t => {
               const isActive = t.id === activeTabId;
               const label = esc(t.label);
-              return '<div class="d-flex align-items-center gap-1 px-2 py-1 small ve-tab border-end border-secondary-subtle" style="cursor:pointer;white-space:nowrap;min-width:80px;max-width:200px;border-bottom:2px solid ' + (isActive ? 'var(--ve-accent)' : 'transparent') + ';background:' + (isActive ? 'var(--bs-body-bg)' : 'transparent') + '" onclick="switchTab(\'' + esc(t.id) + '\')">' +
+              return '<div class="d-flex align-items-center gap-1 px-2 py-1 small ve-tab border-end border-secondary-subtle' + (isActive ? ' on' : '') + '" style="cursor:pointer;white-space:nowrap;min-width:80px;max-width:200px;border-bottom:2px solid ' + (isActive ? 'var(--ve-accent)' : 'transparent') + ';background:' + (isActive ? 'var(--bs-body-bg)' : 'transparent') + '" onclick="switchTab(\'' + esc(t.id) + '\')">' +
                 '<i class="bi bi-file-earmark-text text-secondary" style="font-size:11px"></i>' +
                 '<span class="flex-grow-1 text-truncate' + (isActive ? '' : ' text-secondary') + '">' + label + '</span>' +
                 '<span class="ve-unsaved-dot' + (t.unsaved ? '' : ' d-none') + '" title="未保存"></span>' +
@@ -1571,29 +1494,26 @@ function renderEditor() {
             }).join('')
           ) +
         '</div>' +
-
-          '<div class="ve-split">' +
-            '<div class="pane d-flex flex-column ve-edp" id="veEditorPane">' +
-              '<div class="ve-editor-area">' +
-                '<div class="ve-lngutter"><div class="ve-lngutter-inner" id="veLnNums"></div></div>' +
-                '<div class="ve-editor-scroll">' +
-                  '<pre class="ve-hl" id="veHighlight" aria-hidden="true"></pre>' +
-                  '<textarea class="ve-editor" id="veEditor" spellcheck="false" placeholder="在此输入 Markdown..."></textarea>' +
-                '</div>' +
+        '<div class="ve-split">' +
+          '<div class="pane d-flex flex-column ve-edp" id="veEditorPane">' +
+            '<div class="ve-editor-area">' +
+              '<div class="ve-lngutter"><div class="ve-lngutter-inner" id="veLnNums"></div></div>' +
+              '<div class="ve-editor-scroll">' +
+                '<pre class="ve-hl" id="veHighlight" aria-hidden="true"></pre>' +
+                '<textarea class="ve-editor" id="veEditor" spellcheck="false" placeholder="在此输入 Markdown..."></textarea>' +
               '</div>' +
             '</div>' +
-            '<div class="ve-resizer ve-resizer-v d-none d-md-block' + (previewVisible ? '' : ' ve-resizer-hidden') + '" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' +
-            '<div class="pane ve-preview' + (previewVisible ? '' : ' d-none') + '" id="vePreview"><div class="ve-scroll">' + parseMd(editor.content || '') + '</div></div>' +
           '</div>' +
+          '<div class="ve-resizer ve-resizer-v d-none d-md-block' + (previewVisible ? '' : ' ve-resizer-hidden') + '" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' +
+          '<div class="pane ve-preview' + (previewVisible ? '' : ' d-none') + '" id="vePreview"><div class="ve-scroll">' + parseMd(editor.content || '') + '</div></div>' +
+        '</div>' +
       '</main>' +
     '</div>' +
-
-    // status bar
     '<div class="d-flex align-items-center gap-3 px-3 flex-shrink-0 text-white small" style="height:24px;background:var(--bs-primary-bg-subtle);background-color:#0d6efd">' +
       '<span><i class="bi bi-diagram-3 me-1"></i>' + esc(editor.gitBranch || 'main') + '</span>' +
       (editor.fileSha ? '<span><i class="bi bi-hash me-1"></i>' + esc(editor.fileSha.slice(0, 7)) + '</span>' : '') +
        '<span class="d-flex align-items-center' + (editor.unsaved ? '' : ' d-none') + '" id="veUnsavedBar"><span class="ve-unsaved-dot me-1"></span>有未保存更改</span>' +
-      '<span class="ms-auto">VanillaEditor v0.2.0</span>' +
+      '<span class="ms-auto">VanillaEditor v0.2.1</span>' +
       '<span id="veClock">' + new Date().toLocaleTimeString() + '</span>' +
     '</div>';
 
@@ -1611,9 +1531,8 @@ function renderEditor() {
         else pv.innerHTML = '<div class="ve-scroll">' + parseMd(editor.content) + '</div>';
       }
       renderHighlight(editor.content);
-      // 同步标签页未保存状态（只更新当前标签页的小黄点，避免影响其他标签）
       const tab = openTabs.find(t => t.id === activeTabId);
-      if (tab) tab.unsaved = editor.unsaved;
+      if (tab) { tab.unsaved = editor.unsaved; const et = document.getElementById('veEditor'); if (et) tab.scrollPos = et.scrollTop; }
       const activeTabDot = document.querySelector('.ve-tab.on .ve-unsaved-dot');
       if (activeTabDot) activeTabDot.classList.toggle('d-none', !editor.unsaved);
       const ub = document.getElementById('veUnsavedBar');
@@ -1627,7 +1546,8 @@ function renderEditor() {
         if (r) {
           editor.unsaved = false;
           if (tab) tab.unsaved = false;
-          document.querySelectorAll('.ve-unsaved-dot').forEach(el => el.classList.add('d-none'));
+          const activeDot = document.querySelector('.ve-tab.on .ve-unsaved-dot');
+          if (activeDot) activeDot.classList.add('d-none');
           if (ub) ub.classList.add('d-none');
           toast('已保存', 'ok');
         }
@@ -1641,7 +1561,6 @@ function renderEditor() {
       ta.selectionStart = ta.selectionEnd = s + 2;
       ta.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    // 滚动同步：高亮层 + 行号 + 预览区
     const lnEl = document.getElementById('veLnNums');
     ta.addEventListener('scroll', () => {
       const hlEl = document.getElementById('veHighlight');
@@ -1649,6 +1568,8 @@ function renderEditor() {
       if (lnEl) { lnEl.scrollTop = ta.scrollTop; }
       const pvScroll = document.querySelector('#vePreview .ve-scroll');
       if (pvScroll) { pvScroll.scrollTop = ta.scrollTop; pvScroll.scrollLeft = ta.scrollLeft; }
+      const tab = openTabs.find(t => t.id === activeTabId);
+      if (tab) tab.scrollPos = ta.scrollTop;
     });
   }
   applyLayout();
@@ -1691,55 +1612,51 @@ async function renderSetting() {
           '</div>' +
         '</div>';
        case 'network':
-         return '<div class="card">' +
+         return '<div class="card" style="height:100%">' +
            '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-shield-lock me-1"></i>远程访问控制</div>' +
-           '<div class="card-body" id="veAccessControlBody">' +
-             '<p class="text-secondary small">加载中…</p>' +
-           '</div>' +
+           '<div class="card-body" id="veAccessControlBody" style="min-height:80px"></div>' +
            '<div class="card-header bg-transparent border-secondary-subtle border-top"><i class="bi bi-hdd-network me-1"></i>同步远端设备</div>' +
-           '<div class="card-body" id="veRemoteListBody">' +
-             '<p class="text-secondary small">加载中…</p>' +
+           '<div class="card-body" id="veRemoteListBody" style="min-height:60px"></div>' +
+         '</div>';
+       case 'version':
+         return '<div class="card h-100">' +
+           '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-git me-1"></i>Git 版本管理</div>' +
+           '<div class="card-body">' +
+             '<p class="text-secondary small mb-3">当前作用文档：' +
+               (editor.activeDocId ? '<span class="badge text-bg-secondary ms-1">' + esc(editor.activeDocId) + '</span>' : '<span class="text-warning ms-1">未选择</span>') +
+             '</p>' +
+             '<div class="d-grid gap-2">' +
+               '<button class="btn btn-outline-secondary text-start" onclick="menuGitConfig()"><i class="bi bi-person-vcard me-2"></i>设置 Git 基础信息</button>' +
+               '<button class="btn btn-outline-secondary text-start" onclick="menuRemotes()"><i class="bi bi-hdd-network me-2"></i>配置远程仓库</button>' +
+               '<button class="btn btn-outline-secondary text-start" onclick="menuNewBranch()"><i class="bi bi-plus-square me-2"></i>添加新分支</button>' +
+               '<button class="btn btn-outline-secondary text-start" onclick="menuSwitchBranch()"><i class="bi bi-arrow-left-right me-2"></i>切换分支</button>' +
+               '<button class="btn btn-outline-secondary text-start" onclick="menuMergeBranch()"><i class="bi bi-sign-merge-left me-2"></i>合并分支</button>' +
+               '<button class="btn btn-outline-secondary text-start" onclick="menuReset()"><i class="bi bi-arrow-counterclockwise me-2"></i>回退版本</button>' +
+             '</div>' +
            '</div>' +
          '</div>';
-      case 'version':
-        return '<div class="card h-100">' +
-          '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-git me-1"></i>Git 版本管理</div>' +
-          '<div class="card-body">' +
-            '<p class="text-secondary small mb-3">当前作用文档：' +
-              (editor.activeDocId ? '<span class="badge text-bg-secondary ms-1">' + esc(editor.activeDocId) + '</span>' : '<span class="text-warning ms-1">未选择</span>') +
-            '</p>' +
-            '<div class="d-grid gap-2">' +
-              '<button class="btn btn-outline-secondary text-start" onclick="menuGitConfig()"><i class="bi bi-person-vcard me-2"></i>设置 Git 基础信息</button>' +
-              '<button class="btn btn-outline-secondary text-start" onclick="menuRemotes()"><i class="bi bi-hdd-network me-2"></i>配置远程仓库</button>' +
-              '<button class="btn btn-outline-secondary text-start" onclick="menuNewBranch()"><i class="bi bi-plus-square me-2"></i>添加新分支</button>' +
-              '<button class="btn btn-outline-secondary text-start" onclick="menuSwitchBranch()"><i class="bi bi-arrow-left-right me-2"></i>切换分支</button>' +
-              '<button class="btn btn-outline-secondary text-start" onclick="menuMergeBranch()"><i class="bi bi-sign-merge-left me-2"></i>合并分支</button>' +
-              '<button class="btn btn-outline-secondary text-start" onclick="menuReset()"><i class="bi bi-arrow-counterclockwise me-2"></i>回退版本</button>' +
-            '</div>' +
-          '</div>' +
-        '</div>';
-      case 'about':
-        return '<div class="card h-100">' +
-          '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-info-circle me-1"></i>关于</div>' +
-          '<div class="card-body">' +
-            '<div class="d-flex align-items-center mb-3">' +
-              '<i class="bi bi-journal-richtext fs-1 me-3" style="color:var(--ve-accent)"></i>' +
-              '<div>' +
-                '<div class="fw-semibold fs-5" style="color:var(--ve-accent)">VanillaEditor</div>' +
-                '<div class="text-secondary small">v0.1.0 — 分布式离线 Markdown 编辑器</div>' +
-              '</div>' +
-            '</div>' +
-            '<p class="text-secondary small">每台设备独立运行，数据完全存储在本地，通过 Git 协议实现设备间端到端同步，无需任何第三方服务器。</p>' +
-            '<hr class="border-secondary-subtle">' +
-            '<div class="text-secondary small">' +
-              '<div><i class="bi bi-check2 me-1"></i>完全离线可用</div>' +
-              '<div><i class="bi bi-check2 me-1"></i>端到端 Git 同步</div>' +
-              '<div><i class="bi bi-check2 me-1"></i>版本回溯与分支管理</div>' +
-              '<div><i class="bi bi-check2 me-1"></i>工作区支持（本地目录直接打开）</div>' +
-            '</div>' +
-          '</div>' +
-        '</div>';
-      default: return '';
+       case 'about':
+         return '<div class="card h-100">' +
+           '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-info-circle me-1"></i>关于</div>' +
+           '<div class="card-body">' +
+             '<div class="d-flex align-items-center mb-3">' +
+               '<i class="bi bi-journal-richtext fs-1 me-3" style="color:var(--ve-accent)"></i>' +
+               '<div>' +
+                 '<div class="fw-semibold fs-5" style="color:var(--ve-accent)">VanillaEditor</div>' +
+                 '<div class="text-secondary small">v0.2.1 — 分布式离线 Markdown 编辑器</div>' +
+               '</div>' +
+             '</div>' +
+             '<p class="text-secondary small">每台设备独立运行，数据完全存储在本地，通过 Git 协议实现设备间端到端同步，无需任何第三方服务器。</p>' +
+             '<hr class="border-secondary-subtle">' +
+             '<div class="text-secondary small">' +
+               '<div><i class="bi bi-check2 me-1"></i>完全离线可用</div>' +
+               '<div><i class="bi bi-check2 me-1"></i>端到端 Git 同步</div>' +
+               '<div><i class="bi bi-check2 me-1"></i>版本回溯与分支管理</div>' +
+               '<div><i class="bi bi-check2 me-1"></i>工作区支持（本地目录直接打开）</div>' +
+             '</div>' +
+           '</div>' +
+         '</div>';
+       default: return '';
     }
   }
 
@@ -1769,8 +1686,6 @@ async function renderSetting() {
         '</div>' +
       '</div>' +
     '</nav>' +
-
-    // mobile settings menu offcanvas
     '<div class="offcanvas offcanvas-end d-lg-none" tabindex="-1" id="veSettingsMenuOffcanvas" aria-labelledby="veSettingsMenuOffcanvasLabel">' +
       '<div class="offcanvas-header border-bottom border-secondary-subtle">' +
         '<h6 class="offcanvas-title text-uppercase text-secondary" id="veSettingsMenuOffcanvasLabel" style="font-size:11px;letter-spacing:1px">设置</h6>' +
@@ -1786,11 +1701,11 @@ async function renderSetting() {
         '</ul>' +
       '</div>' +
     '</div>' +
-
     '<div class="d-flex flex-grow-1 overflow-hidden">' +
-      // left menu sidebar
-      (settingSidebarCollapsed ? '' :
-      '<nav class="d-flex flex-column flex-shrink-0 border-end border-secondary-subtle" id="veSettingSidebar" style="width:200px;background:var(--bs-body-bg)">' +
+      '<nav class="d-flex flex-column flex-shrink-0 border-end border-secondary-subtle ve-setting-sidebar"' +
+        ' id="veSettingSidebar"' +
+        (settingSidebarCollapsed ? ' style="display:none"' : ' style="width:200px"') +
+        '>' +
         '<div class="p-3 border-bottom border-secondary-subtle">' +
           '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">设置</span>' +
         '</div>' +
@@ -1804,20 +1719,16 @@ async function renderSetting() {
             '</div>'
           ).join('') +
         '</div>' +
-      '</nav>') +
-      // content area
+      '</nav>' +
       '<div class="flex-grow-1 overflow-auto p-4" id="veSettingContent">' +
         renderContent(currentSettingTab) +
       '</div>' +
     '</div>' +
-
-    // status bar
     '<div class="d-flex align-items-center gap-3 px-3 flex-shrink-0 text-white small" style="height:24px;background-color:#0d6efd">' +
-      '<span class="ms-auto">VanillaEditor v0.2.0</span>' +
+      '<span class="ms-auto">VanillaEditor v0.2.1</span>' +
       '<span id="veClock">' + new Date().toLocaleTimeString() + '</span>' +
     '</div>';
 
-  // init offcanvas
   const sc = document.getElementById('veSettingsMenuClose');
   const st = document.getElementById('veSettingsToggler');
   if (sc) sc.addEventListener('click', closeSettingsMenu);
@@ -1829,7 +1740,6 @@ async function renderSetting() {
       closeSettingsMenu();
     }
   });
-  // lazy load remote list for network tab
   if (currentSettingTab === 'network') {
     loadRemoteListIntoSetting();
     loadAccessControl();
@@ -1855,6 +1765,7 @@ function switchSettingTab(tab) {
 
 function toggleSettingSidebar() {
   settingSidebarCollapsed = !settingSidebarCollapsed;
+  localStorage.setItem('ve_setting_sidebar_collapsed', settingSidebarCollapsed ? '1' : '0');
   const sidebar = document.getElementById('veSettingSidebar');
   if (sidebar) sidebar.style.display = settingSidebarCollapsed ? 'none' : '';
   const btn = document.getElementById('veSettingSidebarToggle');
@@ -1862,7 +1773,6 @@ function toggleSettingSidebar() {
 }
 
 function renderSettingContent(tab) {
-  // account
   if (tab === 'account') {
     return '<div class="card h-100" style="max-width:500px">' +
       '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-person-badge me-1"></i>账号信息</div>' +
@@ -1878,13 +1788,12 @@ function renderSettingContent(tab) {
       '</div>' +
     '</div>';
   }
-  // network
   if (tab === 'network') {
     const tr = syncStatus && syncStatus.tracking;
     const cf = syncStatus ? syncStatus.conflicts : [];
-    return '<div class="card">' +
+    return '<div class="card" style="height:100%">' +
       '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-shield-lock me-1"></i>远程访问控制</div>' +
-      '<div class="card-body" id="veAccessControlBody"></div>' +
+      '<div class="card-body" id="veAccessControlBody" style="min-height:80px"></div>' +
       '<div class="card-header bg-transparent border-secondary-subtle border-top"><i class="bi bi-hdd-network me-1"></i>同步远端设备</div>' +
       '<div class="card-body">' +
         (tr ?
@@ -1914,7 +1823,6 @@ function renderSettingContent(tab) {
       '</div>' +
     '</div>';
   }
-  // version
   if (tab === 'version') {
     return '<div class="card h-100" style="max-width:500px">' +
       '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-git me-1"></i>Git 版本管理</div>' +
@@ -1933,7 +1841,6 @@ function renderSettingContent(tab) {
       '</div>' +
     '</div>';
   }
-  // about
   if (tab === 'about') {
     return '<div class="card h-100" style="max-width:500px">' +
       '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-info-circle me-1"></i>关于</div>' +
@@ -1942,7 +1849,7 @@ function renderSettingContent(tab) {
           '<i class="bi bi-journal-richtext fs-1 me-3" style="color:var(--ve-accent)"></i>' +
           '<div>' +
             '<div class="fw-semibold fs-5" style="color:var(--ve-accent)">VanillaEditor</div>' +
-            '<div class="text-secondary small">v0.1.0 — 分布式离线 Markdown 编辑器</div>' +
+            '<div class="text-secondary small">v0.2.1 — 分布式离线 Markdown 编辑器</div>' +
           '</div>' +
         '</div>' +
         '<p class="text-secondary small">每台设备独立运行，数据完全存储在本地，通过 Git 协议实现设备间端到端同步，无需任何第三方服务器。</p>' +
@@ -2043,12 +1950,31 @@ Router.register('#/login', () => {
 });
 Router.register('#/editor', async () => {
   if (!auth.isLoggedIn) { Router.go('#/login'); return; }
+  const restored = restoreTabState();
   renderEditor();
   await Promise.all([loadFiles(), loadWorkspaces()]);
-  if (editor.activeFilePath) renderEditor();
+  if (!restored && editor.activeFilePath) renderEditor();
+  else if (restored && openTabs.length > 0) {
+    const active = openTabs.find(t => t.id === activeTabId) || openTabs[0];
+    if (active) {
+      editor.activeDocId = active.docId;
+      editor.activeFilePath = active.filePath;
+      editor.content = active.content || '';
+      editor.unsaved = active.unsaved || false;
+      renderEditor();
+      if (active.scrollPos != null && active.scrollPos > 0) {
+        setTimeout(() => {
+          const ta = document.getElementById('veEditor');
+          if (ta) ta.scrollTop = active.scrollPos;
+        }, 100);
+      }
+    }
+  }
 });
 Router.register('#/setting', async () => {
   if (!auth.isLoggedIn) { Router.go('#/login'); return; }
+  const saved = localStorage.getItem('ve_setting_sidebar_collapsed');
+  if (saved === '1') settingSidebarCollapsed = true;
   await renderSetting();
 });
 
