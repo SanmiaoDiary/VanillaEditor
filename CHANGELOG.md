@@ -4,6 +4,13 @@ All notable changes to VanillaEditor will be documented in this file.
 
 ---
 
+## [v0.2.2] - 2026-10-19
+
+### Fixed
+- **隐藏预览后编辑区宽度不占满**：关闭预览时彻底删除 resizer 和 preview 元素，而不是仅隐藏；重新打开时重建这两个元素，确保编辑区能占满父容器宽度
+
+---
+
 ## [v0.2.1] - 2026-10-19
 
 ### Added
