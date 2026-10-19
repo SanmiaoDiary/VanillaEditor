@@ -1,4 +1,4 @@
-// ── Router ───────────────────────────────────────────────────
+﻿// ── Router ───────────────────────────────────────────────────
 const Router = {
   routes: {},
   register(path, render) { this.routes[path] = render; },
@@ -231,30 +231,42 @@ function renderHighlight(content) {
 // ── Preview toggle ───────────────────────────────────────────
 function togglePreview() {
   previewVisible = !previewVisible;
+  const split = document.querySelector('.ve-split');
   const pr = document.getElementById('vePreview');
   const resizer = document.getElementById('veSplitResizer');
   const btn = document.getElementById('vePreviewToggleDesktop');
-  if (pr) {
+  if (split && btn) {
     if (previewVisible) {
+      // 预览打开：重建 resizer 和 preview（如果已被删除）
       if (!resizer) {
-        const split = document.querySelector('.ve-split');
-        if (split) {
-          const r = document.createElement('div');
-          r.className = 've-resizer ve-resizer-v d-none d-md-block';
-          r.id = 'veSplitResizer';
-          r.title = '拖动调整编辑/预览宽度';
-          split.insertBefore(r, pr);
-          r.onpointerdown = e => startResize(e, 'split');
-        }
+        const r = document.createElement('div');
+        r.className = 've-resizer ve-resizer-v d-none d-md-block';
+        r.id = 'veSplitResizer';
+        r.title = '拖动调整编辑/预览宽度';
+        r.onpointerdown = e => startResize(e, 'split');
+        const existingPr = document.getElementById('vePreview');
+        if (existingPr) split.insertBefore(r, existingPr);
+        else split.appendChild(r);
       }
-      pr.classList.remove('d-none');
-      pr.style.display = '';
-      if (btn) btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+      if (!pr) {
+        const p = document.createElement('div');
+        p.className = 'pane ve-preview';
+        p.id = 'vePreview';
+        p.innerHTML = '<div class="ve-scroll">' + parseMd(editor.content || '') + '</div>';
+        const existingResizer = document.getElementById('veSplitResizer');
+        if (existingResizer) split.insertBefore(p, existingResizer);
+        else split.appendChild(p);
+      } else {
+        pr.classList.remove('d-none');
+        pr.style.display = '';
+        pr.style.flex = '1 1 0';
+      }
+      btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
     } else {
+      // 预览关闭：彻底删除 resizer 和 preview，让编辑区占满宽度
       if (resizer) resizer.remove();
-      pr.classList.add('d-none');
-      pr.style.display = 'none';
-      if (btn) btn.innerHTML = '<i class="bi bi-eye"></i>';
+      if (pr) pr.remove();
+      btn.innerHTML = '<i class="bi bi-eye"></i>';
     }
   }
 }
@@ -1504,8 +1516,8 @@ function renderEditor() {
               '</div>' +
             '</div>' +
           '</div>' +
-          '<div class="ve-resizer ve-resizer-v d-none d-md-block' + (previewVisible ? '' : ' ve-resizer-hidden') + '" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' +
-          '<div class="pane ve-preview' + (previewVisible ? '' : ' d-none') + '" id="vePreview"><div class="ve-scroll">' + parseMd(editor.content || '') + '</div></div>' +
+          (previewVisible ? '<div class="ve-resizer ve-resizer-v d-none d-md-block" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' + 
+           '<div class="pane ve-preview" id="vePreview"><div class="ve-scroll">' + parseMd(editor.content || '') + '</div></div>' : '') + 
         '</div>' +
       '</main>' +
     '</div>' +
