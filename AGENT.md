@@ -2,14 +2,17 @@
 
 ## 项目概况
 
-**VanillaEditor** 是一款分布式离线 Markdown 编辑器。每台设备独立运行，数据完全存储在本地，通过 Git 协议实现设备间端到端同步，无需任何第三方服务器。
+**VanillaEditor** 是一款分布式多用户离线 Markdown 编辑器。部署在用户自己的服务器/设备上，数据完全存储在本地，通过 Git 协议实现设备间端到端同步，无需任何第三方服务器或云服务。
 
 **核心特性：**
 - 完全离线可用，无网络时正常编辑
-- 端到端同步：设备间通过 Git 直接互相同步，各自维护完整副本
+- 端到端同步：多台 VE 设备间通过 Git 直接互相同步（复用 VE 自身 HTTP API，见 DESIGN 第 7 章）
 - 版本管理：每次编辑自动记录 Git 提交，随时回溯历史版本
-- 工作区支持：可将任意本地文件夹作为工作区打开，编辑时内容同步回源目录
-- 单用户设计，数据安全私有
+- 原地工作区：直接在服务器授权目录内工作（原地初始化 `.git`，不复制数据）
+- 多用户权限体系：超级管理员 / 管理员 / 普通用户三级权限，工作区相互隔离
+- 认证：JWT 令牌 30 天滑动过期，token_version 吊销机制
+
+> **设计以 [DESIGN.md](./DESIGN.md) 为唯一准绳；实现进度与设计差异记录在 [UI_STATUS.md](./UI_STATUS.md)，改代码前先看它。**
 
 **技术栈：**
 | 层 | 技术 |
@@ -23,6 +26,22 @@
 ---
 
 ## 更新日志
+
+### v0.3.0 — 2026-11-03
+
+**docs:** 设计文档重构（仅文档，无代码变更）
+- DESIGN.md 定稿 v0.3.0 四项架构决策：原地工作区、令牌 30 天滑动过期、全面多用户、设备同步复用 VE 自身 HTTP API
+- 补全 UI 设计：菜单栏明细、编辑器侧边栏四面板（资源管理器/Git/同步/扩展）、设置页逐项设计、视觉 token、移动端菜单收起/展开、弹窗与交互规范
+- 远程访问二次认证设计：默认开启、可关闭、用户自定义认证口令
+- 新增 UI_STATUS.md 跟踪代码与设计差异（12 处不一致 + 待实现 + 架构跟进）
+
+### v0.2.2 — 2026-11-01
+
+**fix:** 隐藏预览后编辑区宽度不占满父容器的问题
+
+### v0.2.1 — 2026-10-31
+
+**fix:** 标签页状态持久化、预览分割条、未保存标记等问题
 
 ### v0.2.0 — 2026-10-18
 
@@ -127,7 +146,6 @@
 # 2. 统一更新所有文件中的版本号
 #    - static/js/app.js     状态栏 "VanillaEditor vX.Y.Z"
 #    - DESIGN.md            封面版本号
-#    - GUI_DESIGN.md        封面版本号
 #    - CHANGELOG.md         新增版本条目（如上一步所述）
 #    - AGENT.md             更新日志末尾追加新版本摘要
 #
@@ -151,27 +169,12 @@ git push
 
 | 文件 | 位置 |
 |------|------|
-| `static/js/app.js` | 状态栏文本 "VanillaEditor v0.1.0" → "VanillaEditor v0.1.3" |
+| `static/js/app.js` | 状态栏文本与关于页 "VanillaEditor vX.Y.Z" |
 | `CHANGELOG.md` | 顶部的版本条目 |
 | `DESIGN.md` | 文档标题下的版本号 |
-| `GUI_DESIGN.md` | 文档标题下的版本号 |
 | `AGENT.md` | 更新日志末尾追加新条目 |
 
----
-
-## 项目架构
-
-（其余内容保持不变...）
-
-```bash
-git add .
-git commit -m "描述你做了什么"
-```
-
-- 提交前确保代码可以正常运行（至少不报语法错误）
-- commit message 必须使用中文，简短描述变更内容
-- 格式：`fix:` / `feat:` / `docs:` / `chore:` 开头（参考 Conventional Commits）
-- 不在 commit 中提交 `static/`、`node_modules/`、`data/`、`__pycache__/`
+> 规划：版本号将改为单点定义、界面统一读取（见 DESIGN 3.4 关于），落地后本清单缩减为两处（单点定义 + CHANGELOG）。
 
 ---
 
@@ -186,14 +189,19 @@ VanillaEditor/
 │   └── git/
 │       └── service.py  # Git 操作封装（list_files/read/write/commit/pull/push/log）
 ├── static/             # 前端（无构建，直接由 Flask 托管）
-│   ├── index.html      # 页面骨架（仅结构，引入 css/js）
+│   ├── index.html      # 挂载壳（UI 全部由 app.js 动态渲染）
 │   ├── css/app.css     # 全部自定义样式
 │   ├── js/app.js       # 全部前端逻辑（UI 渲染 + hash 路由 + apiFetch）
 │   └── vendor/         # 本地 Bootstrap 5.3.3 + bootstrap-icons 1.11.3（不依赖 CDN）
-├── data/               # 运行时数据（用户数据、Git 仓库，已被 .gitignore）
+├── data/               # 运行时数据（users.json 等，已被 .gitignore；规划迁移 config.db）
 ├── requirements.txt    # Python 依赖
 ├── run.py              # 后端启动入口
-└── DESIGN.md           # 详细设计文档
+├── start.bat           # Windows 启动脚本
+├── start.ps1           # PowerShell 启动脚本
+├── .env.example        # 环境变量示例
+├── DESIGN.md           # 设计文档（唯一设计文档）
+├── UI_STATUS.md        # UI 实现状态清单（代码与设计差异跟踪）
+└── CHANGELOG.md        # 版本更新日志
 ```
 
 ### 技术栈
@@ -221,19 +229,21 @@ VanillaEditor/
 
 ### 前端
 
-1. **无构建三文件架构**：`static/index.html`（骨架）+ `static/css/app.css`（样式）+ `static/js/app.js`（逻辑，原生 JS + 手写 hash 路由 + fetch）
-2. **UI 框架**：Bootstrap 5.3.3 与 bootstrap-icons 1.11.3 已下载到 `static/vendor/` 本地引用；页面统一 `data-bs-theme="dark"`
-3. **禁止 emoji**：所有图标必须用 bootstrap-icons（如 `bi-folder`、`bi-git`、`bi-gear`），不得使用 emoji 表情
-4. **路由**：hash 路由，仅三个页面：`#/login`（登录/注册）、`#/editor`（编辑器主工作区）、`#/setting`（用户信息与设置）
-5. **响应式**：侧边栏在 <992px 使用 Bootstrap `offcanvas-lg` 抽屉；编辑区 <768px 纵向堆叠；导航栏提供移动端折叠菜单
-6. 调 API 用全局 `apiFetch()` 函数（自动携带 JWT，401 自动跳登录）
-7. 修改界面：改结构在 `index.html`，改样式在 `css/app.css`，改逻辑/渲染在 `js/app.js`
-8. **注意**：Windows 浏览器可能缓存静态资源，修改后需 Ctrl+Shift+R 刷新
+1. **无构建三文件架构**：`static/index.html`（挂载壳）+ `static/css/app.css`（样式）+ `static/js/app.js`（逻辑，原生 JS + 手写 hash 路由 + fetch）
+2. **界面全部由 `js/app.js` 动态渲染**：`index.html` 只有一个 `<div id="app">` 挂载点，改界面一律改 `app.js` 里的渲染函数，改样式在 `css/app.css`
+3. **UI 框架**：Bootstrap 5.3.3 与 bootstrap-icons 1.11.3 已下载到 `static/vendor/` 本地引用；主题通过 `data-bs-theme` 切换（DESIGN 3.2 主题菜单）
+4. **禁止 emoji**：所有图标必须用 bootstrap-icons（如 `bi-folder`、`bi-git`、`bi-gear`），不得使用 emoji 表情
+5. **禁止硬编码颜色**：统一使用 Bootstrap CSS 变量与 `--ve-accent` 等自定义 token（见 DESIGN 3.5）
+6. **路由**：hash 路由，仅三个页面：`#/login`（登录/注册）、`#/editor`（编辑器主工作区）、`#/setting`（用户信息与设置）
+7. **响应式**：侧边栏在 <992px 使用 Bootstrap `offcanvas-lg` 抽屉；编辑区 <768px 纵向堆叠；导航栏提供移动端折叠菜单
+8. 调 API 用全局 `apiFetch()` 函数（自动携带 JWT，401 自动跳登录）
+9. **交互规范**：输入/确认一律用模态框，禁止原生 `prompt()/confirm()/alert()`；危险操作二次确认（见 DESIGN 3.7）
+10. **注意**：Windows 浏览器可能缓存静态资源，修改后需 Ctrl+Shift+R 刷新
 
 ### Git 操作（后端）
 
 - 每次编辑文件后自动执行 `git add -A` 再 `git commit`
-- commit message 格式：`update: <文件名>`
+- commit message 格式：`update: <文件名>`；首次提交为 `init: <文件名>`
 - pull/push 时使用 `git pull --no-rebase` / `git push`
 - 空仓库（无提交）时 `git status` 会报错，调用前先检查 `.git` 目录是否存在
 - 分支/配置/合并/回退：`/api/git/config`、`/api/git/branches`、`/api/git/branch`、`/api/git/merge`、`/api/git/reset`（实现在 `GitService` 的 config/branches/checkout/merge/reset_hard 方法）
@@ -253,6 +263,8 @@ VanillaEditor/
 在 `static/js/app.js` 中编写渲染函数，并用 `Router.register('#/xxx', ...)` 注册路由（注意路由命名规范：`#/login`、`#/editor`、`#/setting`）。
 
 ### 修改样式
+
+只改 `static/css/app.css`；优先使用 Bootstrap 变量与 DESIGN 3.5 定义的设计 token，禁止硬编码颜色。
 
 ---
 

@@ -10,3 +10,11 @@ data/
 .venv/
 _debug*
 _test_*.html
+#编辑器工作区
+.vscode/
+#agent工作区文件夹
+.zcode/
+#虚拟环境
+.venv/
+#pycache
+__pycache__/

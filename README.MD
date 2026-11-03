@@ -1,15 +1,18 @@
 # VanillaEditor
 
-**一款分布式离线 Markdown 编辑器，每台设备独立运行，数据完全存储在本地。**
+**一款分布式多用户离线 Markdown 编辑器，部署在自己的服务器/设备上，数据完全存储在本地。**
 
 ---
 
 ## 功能特性
 
 - **完全离线** — 无网络时正常使用，不依赖任何云服务
-- **端到端同步** — 设备间通过 Git 直接互相同步，各自维护完整副本，不经过第三方服务器
+- **端到端同步** — 多台 VE 设备间通过 Git 直接互相同步，各自维护完整副本，不经过第三方服务器
 - **版本管理** — 每次编辑自动记录 Git 提交，随时回溯历史版本
-- **单用户设计** — 每台设备独立运行，数据安全私有，无需注册账号
+- **原地工作区** — 直接将服务器上的授权目录作为工作区打开，编辑实时生效，不复制数据（规划中，当前为复制模式，见 UI_STATUS.md）
+- **多用户权限体系** — 超级管理员 / 管理员 / 普通用户三级权限，各用户工作区相互隔离、数据私有（规划中）
+
+> 当前实现进度与设计目标的差异见 [UI_STATUS.md](./UI_STATUS.md)。
 
 ## 技术栈
 
@@ -19,7 +22,7 @@
 | 前端 | 原生 JS（static/index.html），hash 路由 |
 | UI | Bootstrap 5.3.3 + Bootstrap Icons（本地静态） |
 | 版本控制 | Git（subprocess 调用 CLI） |
-| 认证 | bcrypt + JWT |
+| 认证 | bcrypt + JWT（30 天滑动过期） |
 
 ## 快速开始
 
@@ -55,6 +58,11 @@ start.bat
 
 # macOS / Linux
 .venv/bin/python run.py
+
+# 生产模式（Linux）
+pip install gunicorn && gunicorn -w 2 -b 0.0.0.0:5000 run:app
+# 生产模式（Windows）
+pip install waitress && waitress-serve --host 0.0.0.0 --port 5000 run:app
 ```
 
 访问：`http://localhost:5000`
@@ -74,34 +82,38 @@ VanillaEditor/
 │   ├── css/app.css       # 自定义样式
 │   ├── js/app.js         # 全部前端逻辑
 │   └── vendor/           # Bootstrap + bootstrap-icons（本地）
-├── data/                 # 运行时数据（users.json + 各用户仓库，已 gitignore）
+├── data/                 # 运行时数据（users.json 等，已 gitignore；规划迁移 config.db）
 ├── start.bat             # Windows 启动脚本
 ├── start.ps1             # PowerShell 启动脚本
+├── DESIGN.md             # 设计文档（唯一设计文档）
+├── UI_STATUS.md          # UI 实现状态清单
+├── CHANGELOG.md          # 版本更新日志
 ├── requirements.txt
 └── run.py
 ```
 
 ## API 参考
 
-详细 API 说明见 [DESIGN.md](./DESIGN.md)。
+详细 API 说明见 [DESIGN.md](./DESIGN.md) 第 6 章。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/auth/init` | 创建账号 |
+| `POST` | `/api/auth/init` | 创建账号（首次） |
 | `POST` | `/api/auth/login` | 登录，返回 JWT |
-| `GET` | `/api/docs` | 列出文档 |
-| `POST` | `/api/docs` | 新建文档/文件夹 |
+| `GET/POST/DELETE` | `/api/workspaces` | 工作区 打开/列出/关闭 |
+| `GET/POST` | `/api/docs` | 文档 列出/新建 |
 | `DELETE` | `/api/docs/<doc_id>` | 删除文档 |
-| `PUT` | `/api/files/<doc_id>/<path>` | 保存文件内容 |
-| `GET` | `/api/files/<doc_id>/<path>` | 读取文件内容 |
+| `GET/PUT` | `/api/files/<doc_id>/<path>` | 读取/保存文件内容 |
 | `POST` | `/api/commit` | 手动提交 |
 | `GET` | `/api/history/<doc_id>` | 查看提交历史 |
-| `POST` | `/api/sync/pull` | 从远端拉取 |
-| `POST` | `/api/sync/push` | 推送到远端 |
+| `POST` | `/api/sync/pull` / `/api/sync/push` | 从远端拉取 / 推送 |
+| `GET/POST/DELETE` | `/api/sync/remote` | Git 远端管理 |
 | `GET/POST` | `/api/git/config` | 获取/设置 Git 用户信息 |
-| `GET/POST` | `/api/git/branch` | 分支创建与切换 |
+| `GET/POST` | `/api/git/branch` | 分支列表、创建与切换 |
 | `POST` | `/api/git/merge` | 合并分支 |
 | `POST` | `/api/git/reset` | 回退到指定提交 |
+| `GET` | `/api/access/status` | 远程访问状态 |
+| `POST` | `/api/access/enable` / `disable` | 开关远程访问（开启需认证口令，见 DESIGN 4.5.1） |
 
 ## 许可
 
