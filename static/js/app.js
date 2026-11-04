@@ -40,7 +40,6 @@ let loginError = '';
 let saveTimer = null;
 let fontSize = parseInt(localStorage.getItem('ve_font_size') || '14', 10);
 let mobilePreviewMode = localStorage.getItem('ve_mobile_preview') === '1';
-let previewVisible = false;
 let expandedWorkspaces = {};
 let openTabs = [];
 let activeTabId = null;
@@ -232,46 +231,13 @@ function renderHighlight(content) {
 }
 
 // ── Preview toggle ───────────────────────────────────────────
-function togglePreview() {
-  previewVisible = !previewVisible;
-  const split = document.querySelector('.ve-split');
-  const pr = document.getElementById('vePreview');
-  const resizer = document.getElementById('veSplitResizer');
-  const btn = document.getElementById('vePreviewToggleDesktop');
-  if (split && btn) {
-    if (previewVisible) {
-      // 预览打开：重建 resizer 和 preview（如果已被删除）
-      if (!resizer) {
-        const r = document.createElement('div');
-        r.className = 've-resizer ve-resizer-v d-none d-md-block';
-        r.id = 'veSplitResizer';
-        r.title = '拖动调整编辑/预览宽度';
-        r.onpointerdown = e => startResize(e, 'split');
-        const existingPr = document.getElementById('vePreview');
-        if (existingPr) split.insertBefore(r, existingPr);
-        else split.appendChild(r);
-      }
-      if (!pr) {
-        const p = document.createElement('div');
-        p.className = 'pane ve-preview';
-        p.id = 'vePreview';
-        p.innerHTML = '<div class="ve-scroll">' + parseMd(editor.content || '') + '</div>';
-        const existingResizer = document.getElementById('veSplitResizer');
-        if (existingResizer) split.insertBefore(p, existingResizer);
-        else split.appendChild(p);
-      } else {
-        pr.classList.remove('d-none');
-        pr.style.display = '';
-        pr.style.flex = '1 1 0';
-      }
-      btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
-    } else {
-      // 预览关闭：彻底删除 resizer 和 preview，让编辑区占满宽度
-      if (resizer) resizer.remove();
-      if (pr) pr.remove();
-      btn.innerHTML = '<i class="bi bi-eye"></i>';
-    }
-  }
+// 布局模式由顶栏下拉单点控制（DESIGN 3.2）：default=分屏 / editor-only=仅编辑 / preview-only=仅预览
+let layoutMode = localStorage.getItem('ve_layout') || 'default';
+
+function setLayout(mode) {
+  layoutMode = mode;
+  localStorage.setItem('ve_layout', mode);
+  if (location.hash === '#/editor') renderEditor();
 }
 
 setInterval(() => {
@@ -1542,20 +1508,6 @@ function applyTheme() {
   document.documentElement.setAttribute('data-bs-theme', mode);
 }
 
-function setLayout(mode) {
-  localStorage.setItem('ve_layout', mode);
-  applyLayoutMode(mode);
-  toast('布局已切换', 'ok');
-}
-
-function applyLayoutMode(mode) {
-  const ed = document.getElementById('veEditorPane');
-  const pr = document.getElementById('vePreview');
-  if (!ed) return;
-  if (mode === 'editor-only' && previewVisible) togglePreview();
-  else if (mode === 'preview-only' && !previewVisible) togglePreview();
-}
-
 // ── Editor page ──────────────────────────────────────────────
 function renderEditor() {
   const app = document.getElementById('app');
@@ -1848,9 +1800,6 @@ function renderEditor() {
               '<i class="bi bi-' + (mobilePreviewMode ? 'pencil' : 'eye') + '"></i>' +
               (mobilePreviewMode ? ' 编辑' : ' 预览') +
             '</button>' +
-            '<button class="btn btn-sm btn-outline-secondary py-0 d-none d-md-inline-flex" id="vePreviewToggleDesktop" onclick="togglePreview()" title="切换预览">' +
-              '<i class="bi bi-eye"></i>' +
-            '</button>' +
           '</span>' +
         '</div>' +
         '<div class="d-flex align-items-end border-bottom flex-shrink-0 ve-tabs" style="overflow-x:auto;background:var(--bs-body-bg)">' +
@@ -1877,8 +1826,8 @@ function renderEditor() {
               '</div>' +
             '</div>' +
           '</div>' +
-          (previewVisible ? '<div class="ve-resizer ve-resizer-v d-none d-md-block" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' + 
-           '<div class="pane ve-preview" id="vePreview"><div class="ve-scroll">' + parseMd(editor.content || '') + '</div></div>' : '') + 
+          (layoutMode === 'preview-only' || layoutMode === 'default' ? '<div class="ve-resizer ve-resizer-v d-none d-md-block" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' +
+           '<div class="pane ve-preview" id="vePreview"><div class="ve-scroll">' + parseMd(editor.content || '') + '</div></div>' : '') +
         '</div>' +
       '</main>' +
     '</div>' +
@@ -1901,7 +1850,7 @@ function renderEditor() {
       editor.content = e.target.value;
       editor.unsaved = true;
       const pv = document.getElementById('vePreview');
-      if (pv && !pv.classList.contains('d-none')) {
+      if (pv && layoutMode !== 'editor-only') {
         const scrollEl = pv.querySelector('.ve-scroll');
         if (scrollEl) scrollEl.innerHTML = parseMd(editor.content);
         else pv.innerHTML = '<div class="ve-scroll">' + parseMd(editor.content) + '</div>';
