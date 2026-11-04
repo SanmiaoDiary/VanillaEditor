@@ -769,11 +769,18 @@ async function removeRemote(name) {
 
 // ── Menu actions ─────────────────────────────────────────────
 function setPanel(panel) {
+  // 再次点击当前激活面板 → 收起侧边栏（移动端）
+  const wasActive = activePanel === panel;
   activePanel = panel;
   renderEditor();
   if (window.innerWidth < 992) {
     const el = document.getElementById('veSidebar');
-    if (el && !el.classList.contains('show')) {
+    if (!el) return;
+    if (wasActive) {
+      el.classList.remove('show');
+      document.querySelector('.offcanvas-backdrop')?.remove();
+      document.body.classList.remove('modal-open');
+    } else if (!el.classList.contains('show')) {
       el.classList.add('show');
       const bp = document.createElement('div');
       bp.className = 'offcanvas-backdrop fade';
@@ -1338,6 +1345,8 @@ function extensionsPanel() {
 function toggleExt(id, on) {
   localStorage.setItem('ve_ext_' + id, on ? '1' : '0');
   toast('已' + (on ? '启用' : '禁用') + '扩展', 'ok');
+  // 已在编辑器页且扩展影响 UI 时立即重渲；否则等用户切换到对应面板再渲染
+  if (location.hash === '#/editor') renderEditor();
 }
 
 function toggleAutoSync(on) {
@@ -2026,11 +2035,30 @@ async function renderSetting() {
   const sc = document.getElementById('veSettingsMenuClose');
   const st = document.getElementById('veSettingsToggler');
   if (sc) sc.addEventListener('click', closeSettingsMenu);
-  if (st) st.addEventListener('click', () => { const el = document.getElementById('veSettingsMenuOffcanvas'); if (!el.classList.contains('show')) el.classList.add('show'); });
+  if (st) st.addEventListener('click', e => {
+    e.preventDefault();
+    const el = document.getElementById('veSettingsMenuOffcanvas');
+    if (!el) return;
+    if (el.classList.contains('show')) {
+      el.classList.remove('show');
+      document.querySelector('.offcanvas-backdrop')?.remove();
+      document.body.classList.remove('modal-open');
+    } else {
+      el.classList.add('show');
+      const bp = document.createElement('div');
+      bp.className = 'offcanvas-backdrop fade';
+      document.body.appendChild(bp);
+      requestAnimationFrame(() => bp.classList.add('show'));
+      document.body.classList.add('modal-open');
+    }
+  });
   const ssb = document.getElementById('veSettingSidebarToggle');
-  if (ssb) ssb.addEventListener('click', toggleSettingSidebar);
+  if (ssb) ssb.addEventListener('click', e => {
+    e.preventDefault();
+    toggleSettingSidebar();
+  });
   document.addEventListener('click', e => {
-    if (!e.target.closest('#veSettingsMenuOffcanvas') && !e.target.closest('#veSettingsToggler')) {
+    if (!e.target.closest('#veSettingsMenuOffcanvas') && !e.target.closest('#veSettingsToggler') && !e.target.closest('#veSettingSidebarToggle')) {
       closeSettingsMenu();
     }
   });
