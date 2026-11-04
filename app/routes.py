@@ -74,6 +74,13 @@ def create_app():
                 return jsonify({"error": "未登录"}), 401
             try:
                 payload = jwt.decode(token, app.config["JWT_SECRET"], algorithms=["HS256"])
+                # token_version 吊销校验：载荷 ver 与当前存储版本一致才有效
+                users = _load_users()
+                user = users.get(payload["sub"])
+                if user is None:
+                    return jsonify({"error": "用户不存在"}), 401
+                if payload.get("ver", 1) != user.get("token_version", 1):
+                    return jsonify({"error": "令牌已失效，请重新登录"}), 401
                 g.username = payload["sub"]
                 return f(*args, **kwargs)
             except jwt.ExpiredSignatureError:
@@ -107,20 +114,37 @@ def create_app():
         data = request.get_json() or {}
         username = data.get("username", "").strip()
         password = data.get("password", "")
+        access_code = data.get("access_code", "")
         if not username or not password:
             return jsonify({"error": "用户名和密码不能为空"}), 400
+        # 远程访问开启时校验访问码
+        if access_code:
+            ra = _load_remote_access()
+            if ra.get("enabled") and access_code != ra.get("access_code", ""):
+                return jsonify({"error": "访问码错误"}), 401
         users = _load_users()
         user = users.get(username)
         if not user or not bcrypt.checkpw(password.encode(), user["password_hash"].encode()):
             return jsonify({"error": "用户名或密码错误"}), 401
-        expire = datetime.now(timezone.utc) + timedelta(hours=24)
-        token = jwt.encode({"sub": username, "exp": expire}, app.config["JWT_SECRET"], algorithm="HS256")
+        expire = datetime.now(timezone.utc) + timedelta(days=30)
+        token = jwt.encode({"sub": username, "exp": expire, "ver": user.get("token_version", 1)}, app.config["JWT_SECRET"], algorithm="HS256")
         return jsonify({"token": token, "username": username})
 
     @app.route("/api/auth/me", methods=["GET"])
     @require_auth
     def auth_me():
-        return jsonify({"username": g.username})
+        cfg = _load_remote_access()
+        return jsonify({
+            "username": g.username,
+            "access_url": f"http://{cfg.get('_ip', '127.0.0.1')}:{app.config['PORT']}" if cfg.get("enabled") else None,
+            "auth2_enabled": cfg.get("auth2_enabled", True),
+        })
+
+    @app.route("/api/public/config", methods=["GET"])
+    def public_config():
+        """登录页可访问的公开配置（不含敏感信息）"""
+        cfg = _load_remote_access()
+        return jsonify({"remote_access": cfg.get("enabled", False)})
 
     # ── /api/docs ─────────────────────────────────────────────
 
@@ -470,6 +494,35 @@ def create_app():
         with open(_remote_access_path(), "w", encoding="utf-8") as f:
             _json.dump(cfg, f, ensure_ascii=False)
 
+    @app.route("/api/auth/password", methods=["POST"])
+    @require_auth
+    def auth_password():
+        data = request.get_json() or {}
+        users = _load_users()
+        user = users.get(g.username)
+        if not user:
+            return jsonify({"error": "用户不存在"}), 404
+        old_pw = data.get("old_password", "")
+        new_pw = data.get("new_password", "")
+        if not bcrypt.checkpw(old_pw.encode(), user["password_hash"].encode()):
+            return jsonify({"error": "旧密码错误"}), 401
+        if len(new_pw) < 8:
+            return jsonify({"error": "新密码长度至少 8 位"}), 400
+        users[g.username]["password_hash"] = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt()).decode()
+        users[g.username]["token_version"] = users[g.username].get("token_version", 1) + 1
+        _save_users(users)
+        return jsonify({"ok": True})
+
+    @app.route("/api/auth/refresh", methods=["POST"])
+    @require_auth
+    def auth_refresh():
+        user = _load_users().get(g.username)
+        if not user:
+            return jsonify({"error": "用户不存在"}), 404
+        expire = datetime.now(timezone.utc) + timedelta(days=30)
+        token = jwt.encode({"sub": g.username, "exp": expire, "ver": user.get("token_version", 1)}, app.config["JWT_SECRET"], algorithm="HS256")
+        return jsonify({"token": token})
+
     @app.route("/api/access/status", methods=["GET"])
     @require_auth
     def access_status():
@@ -486,6 +539,7 @@ def create_app():
             "local_ip": ip,
             "allowed_ips": cfg.get("allowed_ips", []),
             "url": f"http://{ip}:{app.config['PORT']}",
+            "auth2_enabled": cfg.get("auth2_enabled", True),
         })
 
     @app.route("/api/access/enable", methods=["POST"])
@@ -493,11 +547,14 @@ def create_app():
     def access_enable():
         data = request.get_json() or {}
         cfg = _load_remote_access()
+        # 二次认证校验（默认开启）
+        if cfg.get("auth2_enabled", True):
+            auth_code = data.get("auth_code", "")
+            if auth_code != cfg.get("access_code", ""):
+                return jsonify({"error": "认证口令错误"}), 401
         cfg["enabled"] = True
-        # 生成访问码（6位随机字符）
         import random as _random, string as _string
         cfg["access_code"] = "".join(_random.choices(_string.ascii_letters + _string.digits, k=6))
-        # 允许的IP列表（空表示允许所有局域网IP）
         if "allowed_ips" in data:
             cfg["allowed_ips"] = data["allowed_ips"]
         _save_remote_access(cfg)
@@ -515,7 +572,13 @@ def create_app():
     @app.route("/api/access/disable", methods=["POST"])
     @require_auth
     def access_disable():
+        data = request.get_json() or {}
         cfg = _load_remote_access()
+        # 二次认证校验（默认开启）
+        if cfg.get("auth2_enabled", True):
+            auth_code = data.get("auth_code", "")
+            if auth_code != cfg.get("access_code", ""):
+                return jsonify({"error": "认证口令错误"}), 401
         cfg["enabled"] = False
         cfg["access_code"] = ""
         _save_remote_access(cfg)
@@ -537,6 +600,31 @@ def create_app():
         if data.get("code") == cfg.get("access_code"):
             return jsonify({"ok": True})
         return jsonify({"error": "访问码错误"}), 401
+
+    @app.route("/api/access/auth-code", methods=["PUT"])
+    @require_auth
+    def access_update_auth_code():
+        data = request.get_json() or {}
+        cfg = _load_remote_access()
+        old_code = data.get("old_code", "")
+        new_code = data.get("new_code", "")
+        if cfg.get("auth2_enabled", True):
+            if old_code != cfg.get("access_code", ""):
+                return jsonify({"error": "旧口令错误"}), 401
+        if not new_code or len(new_code) < 4:
+            return jsonify({"error": "口令长度至少 4 位"}), 400
+        cfg["access_code"] = new_code
+        _save_remote_access(cfg)
+        return jsonify({"ok": True})
+
+    @app.route("/api/access/auth2-toggle", methods=["POST"])
+    @require_auth
+    def access_auth2_toggle():
+        data = request.get_json() or {}
+        cfg = _load_remote_access()
+        cfg["auth2_enabled"] = bool(data.get("enabled", True))
+        _save_remote_access(cfg)
+        return jsonify({"ok": True})
 
     # ── /api/workspaces ────────────────────────────────────────
 

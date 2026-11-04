@@ -1,4 +1,4 @@
-:root { --ed-font-size: 14px; --ve-accent: #4ec9b0; --ve-unsaved: #e2c08d; }
+:root { --ed-font-size: 14px; --ve-accent: #4ec9b0; --ve-unsaved: #e2c08d; --ve-statusbar-bg: #0d6efd; --ve-hl-link: #79b8ff; }
 html, body { height: 100%; }
 body { overflow: hidden; }
 #app { height: 100vh; display: flex; flex-direction: column; }
@@ -53,11 +53,11 @@ body { overflow: hidden; }
 .ve-hl code { background: var(--bs-tertiary-bg); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
 .ve-hl .hl-b, .ve-hl strong { font-weight: 700; color: var(--bs-body-color); }
 .ve-hl .hl-i, .ve-hl em { font-style: italic; color: var(--bs-emphasis-color); }
-.ve-hl .hl-lnk { color: #79b8ff; text-decoration: underline; }
+.ve-hl .hl-lnk { color: var(--ve-hl-link); text-decoration: underline; }
 .ve-hl .hl-url { color: var(--bs-secondary-color); }
 .ve-hl .hl-d { text-decoration: line-through; color: var(--bs-secondary-color); }
 .ve-hl .hl-img { color: var(--bs-secondary-color); }
-.ve-hl .hl-mk { color: #79b8ff; font-weight: 600; }
+.ve-hl .hl-mk { color: var(--ve-hl-link); font-weight: 600; }
 
 /* line numbers */
 .ve-editor-area { flex: 1; display: flex; overflow: hidden; min-width: 0; }
@@ -93,6 +93,10 @@ body { overflow: hidden; }
 .ve-preview table { border-collapse: collapse; width: 100%; margin: 8px 0; }
 .ve-preview th, .ve-preview td { border: 1px solid var(--bs-border-color); padding: 6px 10px; text-align: left; }
 .ve-preview th { background: var(--bs-tertiary-bg); }
+
+/* status bar（编辑器/设置页共用，颜色统一走 CSS 变量） */
+.ve-statusbar { height: 24px; background: var(--ve-statusbar-bg); color: #fff; }
+.ve-statusbar .cursor-pointer { cursor: pointer; }
 
 /* misc */
 .ve-unsaved-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ve-unsaved); display: inline-block; flex-shrink: 0; }
