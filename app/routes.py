@@ -495,6 +495,31 @@ def create_app():
         with open(_remote_access_path(), "w", encoding="utf-8") as f:
             _json.dump(cfg, f, ensure_ascii=False)
 
+    # ── 远程访问访问控制：关闭时仅允许本地请求 ───────────────────
+    @app.before_request
+    def _check_remote_access():
+        """远程访问关闭时，拒绝非本地来源的请求（返回 403）"""
+        cfg = _load_remote_access()
+        if not cfg.get("enabled", False):
+            # 本地来源：localhost / 127.0.0.1 / [::1]
+            origin = request.headers.get("Origin", "")
+            referer = request.headers.get("Referer", "")
+            is_local_origin = any(h in origin for h in [
+                "http://127.0.0.1", "http://localhost", "http://[::1]",
+                "https://127.0.0.1", "https://localhost", "https://[::1]"
+            ])
+            is_local_referer = any(h in referer for h in [
+                "http://127.0.0.1", "http://localhost", "http://[::1]",
+                "https://127.0.0.1", "https://localhost", "https://[::1]"
+            ])
+            # 允许公开接口（不检查来源）
+            if request.endpoint == 'public_config':
+                return None
+            # 如果 Origin 或 Referer 指向本地，允许；否则拒绝
+            if not (is_local_origin or is_local_referer):
+                return jsonify({"error": "远程访问已关闭，仅允许本地访问"}), 403
+        return None
+
     @app.route("/api/auth/password", methods=["POST"])
     @require_auth
     def auth_password():
