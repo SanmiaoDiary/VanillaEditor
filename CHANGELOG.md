@@ -4,6 +4,31 @@ All notable changes to VanillaEditor will be documented in this file.
 
 ---
 
+## [v0.3.3] - 2026-11-05
+
+### Security
+- **本地访问豁免**：`/api/public/config` 新增 `is_local` 字段，本地访问（localhost/127.0.0.1/[::1]）时登录页不显示访问码输入框
+
+### Added
+- **自动保存工作区状态**：每 30 秒自动保存 UI 状态到 `.ve/ve_workspace.json`
+  - 保存内容：标签页列表、活跃标签、展开状态、侧边栏宽度、布局模式、字号等
+  - 关闭浏览器时触发立即保存
+- **新增 API 端点**：
+  - `POST /api/workspace/save` — 保存工作区 UI 状态
+  - `GET /api/workspace/state?doc_id=` — 加载工作区 UI 状态
+- **工作区配置迁移**：自动将旧的 `.ve_workspace` 文件迁移到 `.ve/ve_workspace.json` 新格式
+- **原地模式改进**：文件写入同时更新源目录和 Git 仓库，确保数据一致性
+
+### Changed
+- 工作区状态文件从 `.ve_workspace` 迁移到 `.ve/ve_workspace.json`，包含更多配置项
+- 恢复打开工作区时优先从服务器加载状态，无服务器状态则回退到 localStorage
+- 关闭工作区前自动 commit 未保存更改
+
+### Fixed
+- 修复本地访问时仍要求输入访问码的问题（Issue #1）
+
+---
+
 ## [v0.3.1] - 2026-11-04
 
 按 DESIGN.md v0.3.0 对齐 UI 实现的第一批改造（UI_STATUS.md 清单 1–8、10–12 大部分完成）。

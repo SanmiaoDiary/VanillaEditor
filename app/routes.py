@@ -144,7 +144,11 @@ def create_app():
     def public_config():
         """登录页可访问的公开配置（不含敏感信息）"""
         cfg = _load_remote_access()
-        return jsonify({"remote_access": cfg.get("enabled", False)})
+        # 仅当远程访问开启且不是本地访问时才显示访问码字段
+        enabled = cfg.get("enabled", False)
+        origin = request.headers.get("Origin", "")
+        is_local = any(host in origin for host in ["http://127.0.0.1", "http://[::1]", "http://localhost"])
+        return jsonify({"remote_access": enabled, "is_local": is_local})
 
     # ── /api/docs ─────────────────────────────────────────────
 
@@ -223,24 +227,21 @@ def create_app():
         username = g.username
         data = request.get_json() or {}
         content = data.get("content", "")
+        # 原地模式：直接写入源目录中的文件
+        repo_path = git_service._repo_path(username, doc_id)
+        cfg = _read_workspace_config(repo_path)
+        source_path = cfg.get("source_path", "")
+        if source_path and os.path.isdir(source_path):
+            target = os.path.normpath(os.path.join(source_path, rel_path))
+            base = os.path.normpath(source_path)
+            if target.startswith(base + os.sep) or target == base:
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with open(target, "w", encoding="utf-8") as f:
+                    f.write(content)
+        # 同时在 git 仓库中提交（用于版本历史和同步）
         git_service.write_file(username, doc_id, rel_path, content)
-        # 若为工作区，同步写回源目录
-        import json as _json
-        ws_conf = os.path.join(git_service._repo_path(username, doc_id), ".ve_workspace")
-        if os.path.isfile(ws_conf):
-            try:
-                with open(ws_conf, encoding="utf-8") as f:
-                    ws_cfg = _json.load(f)
-                src_path = os.path.normpath(ws_cfg.get("source_path", ""))
-                if src_path and os.path.isdir(src_path):
-                    target = os.path.normpath(os.path.join(src_path, rel_path))
-                    base = os.path.normpath(src_path)
-                    if target.startswith(base + os.sep) or target == base:
-                        os.makedirs(os.path.dirname(target), exist_ok=True)
-                        with open(target, "w", encoding="utf-8") as f:
-                            f.write(content)
-            except Exception:
-                pass
+        git_service.add_all(username, doc_id)
+        git_service.commit(username, doc_id, f"update: {rel_path.split('/')[-1]}")
         changed = git_service.status(username, doc_id)
         return jsonify({"ok": True, "changed": changed})
 
@@ -627,6 +628,42 @@ def create_app():
         return jsonify({"ok": True})
 
     # ── /api/workspaces ────────────────────────────────────────
+    # 工作区配置保存在 <repo_path>/.ve/ve_workspace.json（原地模式）
+    # 历史兼容：旧版使用 .ve_workspace 单文件，会自动迁移到新格式
+
+    def _workspace_config_path(repo_path):
+        return os.path.join(repo_path, ".ve", "ve_workspace.json")
+
+    def _legacy_workspace_config_path(repo_path):
+        return os.path.join(repo_path, ".ve_workspace")
+
+    def _read_workspace_config(repo_path):
+        p = _workspace_config_path(repo_path)
+        if os.path.isfile(p):
+            try:
+                import json as _json
+                with open(p, encoding="utf-8") as f:
+                    return _json.load(f)
+            except Exception:
+                pass
+        # 兼容旧格式 .ve_workspace
+        legacy = _legacy_workspace_config_path(repo_path)
+        if os.path.isfile(legacy):
+            try:
+                import json as _json
+                cfg = _json.load(open(legacy, encoding="utf-8"))
+                _migrate_workspace_config(repo_path, cfg)
+                return cfg
+            except Exception:
+                pass
+        return {"name": repo_path.split(os.sep)[-1], "source_path": ""}
+
+    def _migrate_workspace_config(repo_path, cfg):
+        """将旧的 .ve_workspace 迁移到 .ve/ve_workspace.json"""
+        os.makedirs(os.path.join(repo_path, ".ve"), exist_ok=True)
+        import json as _json
+        with open(_workspace_config_path(repo_path), "w", encoding="utf-8") as f:
+            _json.dump(cfg, f, ensure_ascii=False)
 
     @app.route("/api/workspaces", methods=["GET"])
     @require_auth
@@ -639,20 +676,14 @@ def create_app():
                 item_path = os.path.join(user_dir, item)
                 if not os.path.isdir(item_path):
                     continue
-                ws_conf = os.path.join(item_path, ".ve_workspace")
-                if os.path.isfile(ws_conf):
-                    try:
-                        import json as _json
-                        with open(ws_conf, encoding="utf-8") as f:
-                            cfg = _json.load(f)
-                    except Exception:
-                        cfg = {}
-                    workspaces.append({
-                        "id": item,
-                        "name": cfg.get("name", item),
-                        "source_path": cfg.get("source_path", ""),
-                        "type": "workspace",
-                    })
+                repo_path = os.path.join(item_path, ".git") if os.path.isdir(os.path.join(item_path, ".git")) else item_path
+                cfg = _read_workspace_config(item_path)
+                workspaces.append({
+                    "id": item,
+                    "name": cfg.get("name", item),
+                    "source_path": cfg.get("source_path", ""),
+                    "type": "workspace",
+                })
         return jsonify(workspaces)
 
     @app.route("/api/workspaces", methods=["POST"])
@@ -673,32 +704,27 @@ def create_app():
                 pass  # allow user-specified paths
         doc_id = "ws_" + real.replace(os.sep, "_").replace(":", "_").replace(" ", "_").lower()
         repo_path = git_service.ensure_repo(username, doc_id)
-        # 写入工作区配置
+        # 写入工作区配置（新格式：.ve/ve_workspace.json）
         import json as _json
-        ws_conf = os.path.join(repo_path, ".ve_workspace")
-        with open(ws_conf, "w", encoding="utf-8") as f:
-            _json.dump({"source_path": real, "name": os.path.basename(real)}, f)
-        # 将源目录内容链接或复制到仓库（优先复制，避免权限问题）
-        repo_files = set()
-        for root, dirs, files in os.walk(repo_path):
-            dirs[:] = [d for d in dirs if d != ".git"]
-            for fn in files:
-                repo_files.add(os.path.relpath(os.path.join(root, fn), repo_path))
-        copied = 0
-        for root, dirs, files in os.walk(real):
-            dirs[:] = [d for d in dirs if d not in (".git", ".svn", ".hg", "__pycache__", "node_modules", ".venv", "venv")]
-            rel_root = os.path.relpath(root, real)
-            dest_root = os.path.join(repo_path, rel_root) if rel_root != "." else repo_path
-            os.makedirs(dest_root, exist_ok=True)
-            for fn in files:
-                src_file = os.path.join(root, fn)
-                dst_file = os.path.join(dest_root, fn)
-                shutil.copy2(src_file, dst_file)
-                copied += 1
-        git_service.add_all(username, doc_id)
-        if copied > 0:
-            git_service.commit(username, doc_id, f"init workspace: {os.path.basename(real)}")
-        return jsonify({"id": doc_id, "name": os.path.basename(real), "source_path": real, "file_count": copied}), 201
+        ws_cfg = {
+            "name": os.path.basename(real),
+            "source_path": real,
+            "opened_by": username,
+            "opened_at": datetime.now(timezone.utc).isoformat(),
+            "ui": {},  # 预留 UI 状态（标签页、展开状态等）
+        }
+        os.makedirs(os.path.join(repo_path, ".ve"), exist_ok=True)
+        with open(_workspace_config_path(repo_path), "w", encoding="utf-8") as f:
+            _json.dump(ws_cfg, f, ensure_ascii=False, indent=2)
+        # 原有 .ve_workspace 自动迁移为新格式（如果存在）
+        legacy = _legacy_workspace_config_path(repo_path)
+        if os.path.isfile(legacy):
+            try:
+                _migrate_workspace_config(repo_path, _json.load(open(legacy, encoding="utf-8")))
+                os.remove(legacy)
+            except Exception:
+                pass
+        return jsonify({"id": doc_id, "name": os.path.basename(real), "source_path": real}), 201
 
     @app.route("/api/workspaces/<doc_id>", methods=["DELETE"])
     @require_auth
@@ -708,12 +734,68 @@ def create_app():
         base = os.path.normpath(os.path.join(app.config["DATA_DIR"], username))
         if not doc_path.startswith(base + os.sep):
             return jsonify({"error": "非法路径"}), 400
+        # 有未提交更改时先自动保存
+        try:
+            changed = git_service.status(username, doc_id)
+            if changed:
+                git_service.add_all(username, doc_id)
+                git_service.commit(username, doc_id, "save before close")
+        except Exception:
+            pass
         if os.path.isdir(doc_path):
             try:
                 _force_rmtree(doc_path)
             except OSError as e:
                 return jsonify({"error": f"删除失败：{e}"}), 500
         return jsonify({"ok": True})
+
+    @app.route("/api/workspace/save", methods=["POST"])
+    @require_auth
+    def workspace_save_state():
+        """前端调用：保存工作区的 UI 状态（标签页、展开状态、布局、字号等）"""
+        data = request.get_json() or {}
+        doc_id = data.get("doc_id")
+        if not doc_id:
+            return jsonify({"error": "doc_id required"}), 400
+        username = g.username
+        repo_path = git_service._repo_path(username, doc_id)
+        cfg = _read_workspace_config(repo_path)
+        cfg["ui"] = {
+            "tabs": data.get("tabs", []),
+            "activeTabId": data.get("activeTabId", ""),
+            "expandedWorkspaces": data.get("expandedWorkspaces", {}),
+            "expandedDocs": data.get("expandedDocs", {}),
+            "sidebarW": data.get("sidebarW", 280),
+            "editorPct": data.get("editorPct", 50),
+            "layoutMode": data.get("layoutMode", "default"),
+            "fontSize": data.get("fontSize", 14),
+            "mobilePreview": data.get("mobilePreview", False),
+            "autoSync": data.get("autoSync", False),
+            "lastSavedAt": datetime.now(timezone.utc).isoformat(),
+        }
+        os.makedirs(os.path.join(repo_path, ".ve"), exist_ok=True)
+        import json as _json
+        with open(_workspace_config_path(repo_path), "w", encoding="utf-8") as f:
+            _json.dump(cfg, f, ensure_ascii=False, indent=2)
+        # 同时 git add + commit 让状态变更可追溯
+        git_service.write_file(username, doc_id, ".ve/ve_workspace.json",
+                               _json.dumps(cfg, ensure_ascii=False, indent=2))
+        git_service.add_all(username, doc_id)
+        git_service.commit(username, doc_id, f"save workspace state: {cfg.get('name', doc_id)}")
+        return jsonify({"ok": True})
+
+    @app.route("/api/workspace/state", methods=["GET"])
+    @require_auth
+    def workspace_load_state():
+        """前端调用：加载工作区的 UI 状态"""
+        doc_id = request.args.get("doc_id", "")
+        if not doc_id:
+            return jsonify({"error": "doc_id required"}), 400
+        username = g.username
+        repo_path = git_service._repo_path(username, doc_id)
+        cfg = _read_workspace_config(repo_path)
+        ui = cfg.get("ui", {})
+        return jsonify(ui)
 
     @app.route("/api/workspaces/scan", methods=["POST"])
     @require_auth

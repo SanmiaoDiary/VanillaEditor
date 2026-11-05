@@ -252,7 +252,11 @@ async function renderLogin() {
   // 探测远程访问是否开启（公开接口，无需登录）
   try {
     const r = await fetch('/api/public/config');
-    if (r.ok) { const c = await r.json(); remoteAccessOn = !!c.remote_access; }
+    if (r.ok) {
+      const c = await r.json();
+      // 仅远程访问开启且非本地访问时才要求访问码
+      remoteAccessOn = c.remote_access && !c.is_local;
+    }
   } catch (e) {}
   document.getElementById('app').innerHTML =
     '<div class="container d-flex align-items-center justify-content-center h-100">' +
@@ -276,7 +280,7 @@ async function renderLogin() {
             '<div class="mb-3">' +
               '<label class="form-label small" for="ac"><i class="bi bi-key me-1"></i>远程访问码</label>' +
               '<input type="password" class="form-control" id="ac" placeholder="远程访问时必填" autocomplete="off">' +
-              '<div class="form-text small">检测到远程访问已开启，请输入访问码</div>' +
+              '<div class="form-text small">检测到远程访问已开启（局域网），请输入访问码</div>' +
             '</div>' : '') +
             (isRegister ?
             '<div class="mb-3">' +
@@ -1236,7 +1240,68 @@ function saveTabState() {
       activeTabId: activeTabId
     };
     localStorage.setItem('ve_tab_state', JSON.stringify(state));
+    // 同时保存到服务器（工作区状态）
+    if (editor.activeDocId) {
+      saveWorkspaceState();
+    }
   } catch (e) {}
+}
+
+let autoSaveTimer = null;
+
+function startAutoSave() {
+  // 每 30 秒自动保存一次工作区状态
+  if (autoSaveTimer) clearInterval(autoSaveTimer);
+  autoSaveTimer = setInterval(() => {
+    if (auth.isLoggedIn && editor.activeDocId) {
+      saveWorkspaceState();
+    }
+  }, 30000);
+}
+
+async function saveWorkspaceState() {
+  if (!editor.activeDocId) return;
+  try {
+    await apiFetch('/workspace/save', {
+      method: 'POST',
+      body: JSON.stringify({
+        doc_id: editor.activeDocId,
+        tabs: openTabs.map(t => ({ id: t.id, docId: t.docId, filePath: t.filePath, label: t.label, unsaved: t.unsaved, scrollPos: t.scrollPos || 0 })),
+        activeTabId: activeTabId,
+        expandedWorkspaces: expandedWorkspaces,
+        expandedDocs: expandedDocs,
+        sidebarW: layout.sidebarW,
+        editorPct: layout.editorPct,
+        layoutMode: layoutMode,
+        fontSize: fontSize,
+        mobilePreview: mobilePreviewMode,
+        autoSync: autoSyncEnabled,
+      })
+    });
+  } catch (e) { /* silently fail */ }
+}
+
+async function restoreWorkspaceState() {
+  if (!editor.activeDocId) return false;
+  try {
+    const data = await apiFetch('/workspace/state?doc_id=' + encodeURIComponent(editor.activeDocId));
+    if (data) {
+      if (data.tabs && data.tabs.length > 0) {
+        openTabs = data.tabs;
+        activeTabId = data.activeTabId;
+        expandedWorkspaces = data.expandedWorkspaces || {};
+        expandedDocs = data.expandedDocs || {};
+        layout.sidebarW = data.sidebarW || 280;
+        layout.editorPct = data.editorPct || 50;
+        layoutMode = data.layoutMode || 'default';
+        fontSize = data.fontSize || 14;
+        mobilePreviewMode = data.mobilePreview || false;
+        autoSyncEnabled = data.autoSync || false;
+        return true;
+      }
+    }
+  } catch (e) {}
+  return false;
 }
 
 function restoreTabState() {
@@ -1258,7 +1323,10 @@ function restoreTabState() {
   } catch (e) { return false; }
 }
 
-window.addEventListener('beforeunload', saveTabState);
+window.addEventListener('beforeunload', () => {
+  saveTabState();
+  if (editor.activeDocId) saveWorkspaceState();
+});
 
 // ── Sync / Extensions panels ─────────────────────────────────
 let autoSyncEnabled = localStorage.getItem('ve_auto_sync') === '1';
@@ -1910,6 +1978,7 @@ function renderEditor() {
   applyLayout();
   initResizers();
   applyMobilePreviewState();
+  startAutoSave();
   if (activePanel === 'git' || activePanel === 'sync') loadGitData();
 }
 
@@ -2425,7 +2494,29 @@ Router.register('#/login', () => {
 });
 Router.register('#/editor', async () => {
   if (!auth.isLoggedIn) { Router.go('#/login'); return; }
-  const restored = restoreTabState();
+  // 先尝试从服务器加载工作区状态
+  const restored = await restoreWorkspaceState();
+  // 回退到 localStorage
+  if (!restored) {
+    try {
+      const raw = localStorage.getItem('ve_tab_state');
+      if (raw) {
+        const state = JSON.parse(raw);
+        if (state.tabs && state.tabs.length > 0) {
+          openTabs = state.tabs;
+          activeTabId = state.activeTabId;
+          if (openTabs.length > 0) {
+            const first = openTabs.find(t => t.id === activeTabId) || openTabs[0];
+            editor.activeDocId = first.docId;
+            editor.activeFilePath = first.filePath;
+            editor.content = first.content || '';
+            editor.unsaved = first.unsaved || false;
+          }
+          return true;
+        }
+      }
+    } catch (e) {}
+  }
   renderEditor();
   await Promise.all([loadFiles(), loadWorkspaces()]);
   if (!restored && editor.activeFilePath) renderEditor();
