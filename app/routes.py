@@ -1,5 +1,6 @@
 import os
 import shutil
+import socket
 import stat
 import sys
 import time
@@ -10,6 +11,44 @@ from datetime import datetime, timezone, timedelta
 import bcrypt
 
 from app.git.service import GitService
+
+DEFAULT_PORT = 58446
+
+
+def _port_free(host, port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+            return True
+        except OSError:
+            return False
+
+
+def _random_free_port(host):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, 0))  # OS 分配一个可用高位端口
+        return s.getsockname()[1]
+
+
+def pick_port(host):
+    """端口策略（DESIGN 8.3）：
+    - 用户显式设置 PORT → 强意图，被占用直接报错退出
+    - 未设置 → 默认 58446；被占用时让 OS 分配随机可用高位端口
+    选定后写回 os.environ["PORT"]，debug reloader 重启子进程沿用同一端口
+    """
+    explicit = "PORT" in os.environ
+    port = int(os.environ.get("PORT", DEFAULT_PORT))
+    if not explicit:
+        os.environ["PORT"] = str(port)
+    if _port_free(host, port):
+        return port
+    if explicit:
+        raise SystemExit(f"[启动失败] 端口 {port} 已被占用（PORT 为显式配置，不自动更换）")
+    fallback = _random_free_port(host)
+    os.environ["PORT"] = str(fallback)
+    print(f"[端口回退] 默认端口 {port} 已被占用，改用 {fallback}")
+    return fallback
 
 
 def _force_rmtree(path, retries=3):
@@ -40,7 +79,7 @@ def create_app():
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32))
     app.config["JWT_SECRET"] = os.environ.get("JWT_SECRET", "dev-secret-change-me")
     app.config["DATA_DIR"] = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data"))
-    app.config["PORT"] = int(os.environ.get("PORT", 5000))
+    app.config["PORT"] = int(os.environ.get("PORT", 58446))
     app.config["HOST"] = os.environ.get("HOST", "0.0.0.0")
 
     git_service = GitService(app.config["DATA_DIR"])
@@ -877,5 +916,6 @@ if __name__ == "__main__":
     from app import create_app as _ca
     app, git = _ca()
     os.makedirs(app.config["DATA_DIR"], exist_ok=True)
-    print(f"VanillaEditor on http://{app.config['HOST']}:{app.config['PORT']}")
-    app.run(host=app.config["HOST"], port=app.config["PORT"], debug=True)
+    port = pick_port(app.config["HOST"])
+    print(f"VanillaEditor on http://{app.config['HOST']}:{port}")
+    app.run(host=app.config["HOST"], port=port, debug=True)

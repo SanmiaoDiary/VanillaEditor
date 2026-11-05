@@ -290,4 +290,4 @@ start.bat
 .venv/bin/python run.py
 ```
 
-访问：`http://localhost:5000`（生产模式）或局域网内其他设备访问 `http://<本机IP>:5000`
+访问：`http://localhost:58446`（生产模式）或局域网内其他设备访问 `http://<本机IP>:58446`

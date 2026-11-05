@@ -4,6 +4,34 @@ All notable changes to VanillaEditor will be documented in this file.
 
 ---
 
+## [v0.3.5] - 2026-11-05
+
+### Security
+- **默认端口 5000 → 58446**：非特权高位端口，避开常见服务端口与高频扫描范围，降低被扫描命中概率
+
+### Added
+- **端口冲突自动回退**（DESIGN 8.3）：
+  - 未显式设置 `PORT` 时，默认端口被占用自动让 OS 分配随机可用高位端口，终端打印实际端口
+  - 显式设置 `PORT` 时视为强意图：被占用直接报错退出，不自动更换（避免生产环境 WSGI/反代指向失效）
+  - 选定端口写回 `os.environ["PORT"]`，debug 模式 reloader 重启子进程沿用同一端口
+
+### Docs
+- DESIGN.md 新增 8.3 端口策略章节；8.2-8.6 全部端口示例更新为 58446（含 nginx 反代、systemd 模板、防火墙说明）
+- README.md / AGENT.md / .env.example 端口引用同步更新
+
+---
+
+## [v0.3.4] - 2026-11-05
+
+### Security
+- **远程访问访问控制**（DESIGN 4.5）：远程访问关闭时，仅允许 localhost/127.0.0.1/[::1] 来源请求，其他来源返回 HTTP 403；公开接口 `/api/public/config` 始终放行
+
+### Docs
+- **AGENT.md 新增开发工作流规范**：收到用户问题必须先审查判断 → 更新设计文档 → 修改代码 → 提交推送，严禁跳过设计文档直接改代码
+- DESIGN.md 4.5 补充访问控制规则说明与本地访问豁免逻辑
+
+---
+
 ## [v0.3.3] - 2026-11-05
 
 ### Security

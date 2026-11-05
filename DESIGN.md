@@ -1,6 +1,6 @@
 # VanillaEditor 设计文档
 
-> 版本：v0.3.0 ｜ 最后更新：2026-11-03
+> 版本：v0.3.5 ｜ 最后更新：2026-11-05
 
 ---
 
@@ -558,7 +558,7 @@ develop（显示分支）（分支切换按钮） | （字数显示）2064 字 �
 │  │                                                                │
 │  │  若远程访问已开启：                                           │  │
 │  │  ┌─────────────────────────────────────────────────────┐   │  │
-│  │  │  访问地址：http://192.168.1.100:5000  [复制]         │   │  │
+│  │  │  访问地址：http://192.168.1.100:58446  [复制]         │   │  │
 │  │  │  访问码：  VE2026abc  [复制]                        │   │  │
 │  │  │  ⚠️  将此地址和访问码发给局域网内的其他设备            │   │  │
 │  │  └─────────────────────────────────────────────────────┘   │  │
@@ -628,7 +628,7 @@ develop（显示分支）（分支切换按钮） | （字数显示）2064 字 �
 │  │                                                                │
 │  │  远端列表：                                                 │  │
 │  │  ┌─────────────────────────────────────────────────────┐   │  │
-│  │  │  origin     http://192.168.1.100:5000  [拉取][推送][删除]│  │
+│  │  │  origin     http://192.168.1.100:58446  [拉取][推送][删除]│  │
 │  │  └─────────────────────────────────────────────────────┘   │  │
 │  │  [+ 添加远端]  输入格式：http://ip:port                    │  │
 │  └─────────────────────────────────────────────────────────┘  │
@@ -957,7 +957,7 @@ develop（显示分支）（分支切换按钮） | （字数显示）2064 字 �
 ├──────────────────────────────────────────┤
 │                                          │
 │  设备名称    [orange pi 4 lts           ]│
-│  设备地址    [http://192.168.1.50:5000   ]│
+│  设备地址    [http://192.168.1.50:58446   ]│
 │                                          │
 │  ──────────────────────────────────────  │
 │  配对流程：                               │
@@ -1602,12 +1602,12 @@ push <remote>
 │  ┌─────────────────────────────────────────────────────────┐  │
 │  │                                                         │  │
 │  │  🖥  Orange Pi 4 LTS       ● 在线   2分钟前同步        │  │
-│  │     http://192.168.1.50:5000                            │  │
+│  │     http://192.168.1.50:58446                            │  │
 │  │     [立即同步]  [⋯重命名/删除]                          │  │
 │  │  ─────────────────────────────────────────────────────  │  │
 │  │                                                         │  │
 │  │  📱  iPhone-14             ○ 离线   昨天同步失败        │  │
-│  │     http://192.168.1.101:5000                           │  │
+│  │     http://192.168.1.101:58446                           │  │
 │  │     [立即同步]  [⋯重命名/删除]                          │  │
 │  │                                                         │  │
 │  └─────────────────────────────────────────────────────────┘  │
@@ -1633,7 +1633,7 @@ push <remote>
 │  步骤 1：填写对端信息                                          │
 │  ┌─────────────────────────────────────────────────────────┐  │
 │  │  设备名称    [Orange Pi 4 LTS      ]                    │  │
-│  │  设备地址    [http://192.168.1.50:5000  ]               │  │
+│  │  设备地址    [http://192.168.1.50:58446  ]               │  │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                                │
 │              [下一步：生成配对码]                              │
@@ -1742,36 +1742,43 @@ pip install -r requirements.txt
 
 # 生产模式（Linux，推荐）
 pip install gunicorn
-gunicorn -w 2 -b 0.0.0.0:5000 run:app
+gunicorn -w 2 -b 0.0.0.0:58446 run:app
 
 # 生产模式（Windows，gunicorn 不支持 Windows，改用 waitress）
 pip install waitress
-waitress-serve --host 0.0.0.0 --port 5000 run:app
+waitress-serve --host 0.0.0.0 --port 58446 run:app
 ```
 
-### 8.3 环境变量配置
+### 8.3 端口策略
+
+- **默认端口 58446**：非特权高位端口，避开常见服务端口（5000/8000/8080 等）与高频扫描范围，降低被扫到的概率
+- **端口冲突自动回退**：启动时先探测默认端口是否可用（`socket.bind` 试探）；被占用时由操作系统分配一个随机可用高位端口，并在终端打印实际监听端口
+- 用户显式设置 `PORT` 环境变量时视为强意图：该端口被占用则直接报错退出，**不**自动换端口（避免生产环境 WSGI/反代指向失效）
+- 回退机制仅用于开发模式直启（`run.py` / `start.bat`）；生产模式（gunicorn/waitress）由部署方自行指定端口
+
+### 8.4 环境变量配置
 
 | 变量         | 默认值                 | 说明                                                           |
 |--------------|------------------------|----------------------------------------------------------------|
 | `SECRET_KEY` | 随机生成               | Flask 会话密钥                                                 |
 | `JWT_SECRET` | `dev-secret-change-me` | JWT 签名密钥；生产模式检测到默认值时将在启动日志中打印醒目警告 |
 | `DATA_DIR`   | `./data`               | 数据目录路径                                                   |
-| `PORT`       | `5000`                 | 监听端口                                                       |
+| `PORT`       | `58446`                | 监听端口；未显式设置且被占用时自动回退随机高位端口（见 8.3）   |
 | `HOST`       | `0.0.0.0`              | 监听地址（`0.0.0.0` 表示接受所有网卡）                         |
 
-### 8.4 防火墙配置
+### 8.5 防火墙配置
 
-服务器需开放以下端口（默认 5000）：
-- TCP 5000（或自定义端口）用于 HTTP 访问
+服务器需开放以下端口（默认 58446）：
+- TCP 58446（或自定义端口）用于 HTTP 访问
 - 如需 Git HTTPS 同步，还需开放对应 Git 服务端口
 
-### 8.5 注意事项
+### 8.6 注意事项
 
 1. **密码哈希兼容** — `data/users.json` 中的 bcrypt 哈希可直接迁移，无需重置密码
 2. **数据完整性** — `data/` 目录包含用户配置与账号数据；Git 仓库位于各工作区目录内（原地模式），迁移时需将 `data/` 和所有已打开的工作区目录一并复制
 3. **Git 权限** — 确保运行 VE 的用户对 `DATA_DIR` 及所有工作区目录有读写权限
 4. **Windows 注意** — 系统 `python` 命令可能指向 Windows Store 占位符，请使用虚拟环境内的 Python
-5. **防火墙配置** — 服务器需开放 TCP 5000（HTTP）；如需 Git HTTPS 同步，还需开放对应端口
+5. **防火墙配置** — 服务器需开放 TCP 58446（HTTP）；如需 Git HTTPS 同步，还需开放对应端口
 
 ### 8.6 生产环境反向代理（nginx 示例）
 
@@ -1781,7 +1788,7 @@ server {
     server_name your.domain.com;
 
     location / {
-        proxy_pass http://127.0.0.1:5000;
+        proxy_pass http://127.0.0.1:58446;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -1816,7 +1823,7 @@ After=network.target
 [Service]
 User=veuser
 WorkingDirectory=/opt/vanilla-editor
-ExecStart=/opt/vanilla-editor/.venv/bin/gunicorn -w 2 -b 127.0.0.1:5000 run:app
+ExecStart=/opt/vanilla-editor/.venv/bin/gunicorn -w 2 -b 127.0.0.1:58446 run:app
 Restart=on-failure
 Environment="PATH=/opt/vanilla-editor/.venv/bin"
 Environment="DATA_DIR=/opt/vanilla-editor/data"
@@ -1933,7 +1940,7 @@ cd data/SanmiaoDiary/ws_xxx && git log --oneline -5
 python -c "import jwt; print(jwt.decode(token, key='dev-secret-change-me', algorithms=['HS256'], options={'verify_exp': False}))"
 
 # 模拟 auth/init（无密码时）
-curl -X POST http://localhost:5000/api/auth/init -H 'Content-Type: application/json' -d '{"username":"test","password":"test123"}'
+curl -X POST http://localhost:58446/api/auth/init -H 'Content-Type: application/json' -d '{"username":"test","password":"test123"}'
 ```
 
 ### 11.2 常见坑点
