@@ -46,7 +46,7 @@ python -m venv .venv
 copy .env.example .env
 ```
 
-编辑 `.env` 可修改端口（默认 5000）和数据目录。
+编辑 `.env` 可修改端口（默认 58446，被占用时自动换随机高位端口）和数据目录。
 
 ### 运行
 
@@ -60,12 +60,12 @@ start.bat
 .venv/bin/python run.py
 
 # 生产模式（Linux）
-pip install gunicorn && gunicorn -w 2 -b 0.0.0.0:5000 run:app
+pip install gunicorn && gunicorn -w 2 -b 0.0.0.0:58446 run:app
 # 生产模式（Windows）
-pip install waitress && waitress-serve --host 0.0.0.0 --port 5000 run:app
+pip install waitress && waitress-serve --host 0.0.0.0 --port 58446 run:app
 ```
 
-访问：`http://localhost:5000`
+访问：`http://localhost:58446`
 
 ---
 
