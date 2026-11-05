@@ -8,7 +8,33 @@ class GitService:
     def __init__(self, data_dir):
         self.data_dir = data_dir
 
+    # ── 工作区注册表（原地模式：doc_id → 源目录） ────────────────
+
+    def _registry_path(self, username):
+        return os.path.join(self.data_dir, username, "workspaces.json")
+
+    def load_registry(self, username):
+        p = self._registry_path(username)
+        if not os.path.isfile(p):
+            return {}
+        try:
+            import json
+            with open(p, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def save_registry(self, username, reg):
+        import json
+        os.makedirs(os.path.dirname(self._registry_path(username)), exist_ok=True)
+        with open(self._registry_path(username), "w", encoding="utf-8") as f:
+            json.dump(reg, f, ensure_ascii=False, indent=2)
+
     def _repo_path(self, username, doc_id):
+        """原地模式：注册表命中则返回源目录（仓库即源目录）；否则回退 data/<user>/<doc_id>（docs 模式）"""
+        entry = self.load_registry(username).get(doc_id)
+        if entry and entry.get("source_path") and os.path.isdir(entry["source_path"]):
+            return entry["source_path"]
         return os.path.join(self.data_dir, username, doc_id)
 
     def _md_path(self, repo_path, rel_path):
@@ -33,12 +59,18 @@ class GitService:
         return repo_path
 
     def repo_exists(self, username, doc_id):
-        return os.path.isdir(self._repo_path(username, doc_id))
+        """原地模式：注册表命中即存在；docs 模式：目录下有 .git 才算"""
+        entry = self.load_registry(username).get(doc_id)
+        if entry and entry.get("source_path"):
+            return os.path.isdir(entry["source_path"])
+        return os.path.isdir(os.path.join(self._repo_path(username, doc_id), ".git"))
 
     def ensure_repo(self, username, doc_id):
-        if not self.repo_exists(username, doc_id):
+        """原地模式：源目录已含 .git 则复用，否则在源目录内 git init（DESIGN 4.3.1）"""
+        repo_path = self._repo_path(username, doc_id)
+        if not os.path.isdir(os.path.join(repo_path, ".git")):
             return self.init_repo(username, doc_id)
-        return self._repo_path(username, doc_id)
+        return repo_path
 
     # ── file operations ─────────────────────────────────────────
 
@@ -60,12 +92,11 @@ class GitService:
         return sorted(result, key=lambda x: x["path"])
 
     def read_file(self, username, doc_id, rel_path):
-        repo_path = self.ensure_repo(username, doc_id)
+        """读取文件；不存在时返回空字符串（原地模式下禁止在用户目录凭空创建文件）"""
+        repo_path = self._repo_path(username, doc_id)
         safe_path = self._md_path(repo_path, rel_path)
-        os.makedirs(os.path.dirname(safe_path), exist_ok=True)
-        if not os.path.exists(safe_path):
-            with open(safe_path, "w", encoding="utf-8") as f:
-                f.write("")
+        if not os.path.isfile(safe_path):
+            return ""
         with open(safe_path, encoding="utf-8") as f:
             return f.read()
 

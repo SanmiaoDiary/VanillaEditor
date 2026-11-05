@@ -1,5 +1,5 @@
 ﻿// ── Version（单点定义，状态栏/关于页/登录页共用）──────────────
-const VE_VERSION = 'v0.3.5';
+const VE_VERSION = 'v0.3.6';
 
 // ── Router ───────────────────────────────────────────────────
 const Router = {
@@ -366,13 +366,14 @@ async function openWorkspace(path) {
 }
 
 async function closeWorkspace(docId) {
-  if (!confirm('关闭工作区「' + docId + '」？（仅删除编辑器内的记录，源文件不会受影响）')) return;
-  try {
-    await apiFetch('/workspaces/' + encodeURIComponent(docId), { method: 'DELETE' });
-    toast('工作区已关闭', 'ok');
-    await loadWorkspaces();
-    renderEditor();
-  } catch (e) { toast('关闭失败：' + e.message, 'err'); }
+  showConfirm('关闭工作区', '关闭工作区「' + esc(docId) + '」？\n未提交的更改将被保存。', async () => {
+    try {
+      await apiFetch('/workspaces/' + encodeURIComponent(docId), { method: 'DELETE' });
+      toast('工作区已关闭', 'ok');
+      await loadWorkspaces();
+      renderEditor();
+    } catch (e) { toast('关闭失败：' + e.message, 'err'); }
+  });
 }
 
 let wsBrowsePath = '';
@@ -628,50 +629,51 @@ function switchTab(tabId) {
 }
 
 async function createFolder() {
-  const name = prompt('新建文件夹名称：');
-  if (!name) return;
-  const r = await apiFetch('/docs', { method: 'POST', body: JSON.stringify({ name: name, folder: true }) });
-  if (r) {
-    expandedDocs[r.id] = true;
-    await loadFiles();
-    renderEditor();
-    toast('文件夹已创建', 'ok');
-  }
+  showInput('新建文件夹', '文件夹名称', 'my-folder', async name => {
+    const r = await apiFetch('/docs', { method: 'POST', body: JSON.stringify({ name: name, folder: true }) });
+    if (r) {
+      expandedDocs[r.id] = true;
+      await loadFiles();
+      renderEditor();
+      toast('文件夹已创建', 'ok');
+    }
+  });
 }
 
 async function createFile() {
-  const name = prompt('新建文件名称（如 note.md）：');
-  if (!name) return;
-  if (editor.activeDocId) {
-    await apiFetch('/files/' + editor.activeDocId + '/' + encodeURIComponent(name), {
-      method: 'PUT', body: JSON.stringify({ content: '' })
-    });
-    await loadFiles();
-    await openFile(editor.activeDocId, name);
-  } else {
-    const r = await apiFetch('/docs', { method: 'POST', body: JSON.stringify({ name: name, content: '' }) });
-    if (r) { await loadFiles(); await openFile(r.id, r.name); }
-  }
-  renderEditor();
+  showInput('新建文件', '文件名称（如 note.md）', 'note.md', async name => {
+    if (editor.activeDocId) {
+      await apiFetch('/files/' + editor.activeDocId + '/' + encodeURIComponent(name), {
+        method: 'PUT', body: JSON.stringify({ content: '' })
+      });
+      await loadFiles();
+      await openFile(editor.activeDocId, name);
+    } else {
+      const r = await apiFetch('/docs', { method: 'POST', body: JSON.stringify({ name: name, content: '' }) });
+      if (r) { await loadFiles(); await openFile(r.id, r.name); }
+    }
+    renderEditor();
+  });
 }
 
 async function deleteDoc(docId) {
-  if (!confirm('确定删除文档「' + docId + '」？其 Git 历史将一并删除。')) return;
-  try {
-    const r = await apiFetch('/docs/' + encodeURIComponent(docId), { method: 'DELETE' });
-    if (!r) return;
-  } catch (e) {
-    toast('删除失败：' + e.message, 'err');
-    return;
-  }
-  delete expandedDocs[docId];
-  openTabs = openTabs.filter(t => t.docId !== docId);
-  if (editor.activeDocId === docId) {
-    editor.activeDocId = ''; editor.activeFilePath = ''; editor.content = ''; editor.unsaved = false;
-  }
-  await loadFiles();
-  renderEditor();
-  toast('已删除', 'ok');
+  showConfirm('删除文档', '确定删除文档「' + esc(docId) + '」？其 Git 历史将一并删除。', async () => {
+    try {
+      const r = await apiFetch('/docs/' + encodeURIComponent(docId), { method: 'DELETE' });
+      if (!r) return;
+    } catch (e) {
+      toast('删除失败：' + e.message, 'err');
+      return;
+    }
+    delete expandedDocs[docId];
+    openTabs = openTabs.filter(t => t.docId !== docId);
+    if (editor.activeDocId === docId) {
+      editor.activeDocId = ''; editor.activeFilePath = ''; editor.content = ''; editor.unsaved = false;
+    }
+    await loadFiles();
+    renderEditor();
+    toast('已删除', 'ok');
+  });
 }
 
 // ── Git operations ───────────────────────────────────────────
@@ -911,6 +913,35 @@ function closeModal() {
   if (el) { const m = bootstrap.Modal.getInstance(el); if (m) m.hide(); }
 }
 
+// ── 模态框替代原生 prompt/confirm ──────────────────────────────
+function showConfirm(title, message, onConfirm) {
+  showModal(title,
+    '<div class="text-danger">' + esc(message) + '</div>',
+    '<button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">取消</button>' +
+    '<button type="button" class="btn btn-sm btn-danger" id="veConfirmBtn">确认</button>');
+  document.getElementById('veConfirmBtn').addEventListener('click', () => {
+    closeModal();
+    if (onConfirm) onConfirm();
+  });
+}
+
+function showInput(title, label, placeholder, onSubmit) {
+  showModal(title,
+    '<label class="form-label small">' + esc(label) + '</label>' +
+    '<input class="form-control form-control-sm" id="veInputVal" placeholder="' + esc(placeholder) + '" autofocus>',
+    '<button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">取消</button>' +
+    '<button type="button" class="btn btn-sm btn-primary" id="veInputSubmit">确定</button>');
+  const inp = document.getElementById('veInputVal');
+  const btn = document.getElementById('veInputSubmit');
+  function doSubmit() {
+    const v = inp.value.trim();
+    if (v) { closeModal(); onSubmit(v); }
+    else inp.focus();
+  }
+  btn.addEventListener('click', doSubmit);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') doSubmit(); });
+}
+
 function menuOpen() {
   if (sidebarDocs.length === 0) return showModal('打开文档', '<div class="text-secondary small">暂无文档，请先新建或导入</div>');
   const body = sidebarDocs.map(doc =>
@@ -961,14 +992,14 @@ async function saveNow() {
 }
 
 async function menuSaveAs() {
-  const name = prompt('另存为（新文档名，如 copy.md）：');
-  if (!name) return;
-  const r = await apiFetch('/docs', { method: 'POST', body: JSON.stringify({ name: name, content: editor.content }) });
-  if (r) {
-    await loadFiles();
-    await openFile(r.id, r.name);
-    toast('已另存为 ' + name, 'ok');
-  }
+  showInput('另存为', '新文档名（如 copy.md）', 'copy.md', async name => {
+    const r = await apiFetch('/docs', { method: 'POST', body: JSON.stringify({ name: name, content: editor.content }) });
+    if (r) {
+      await loadFiles();
+      await openFile(r.id, r.name);
+      toast('已另存为 ' + name, 'ok');
+    }
+  });
 }
 
 function needDoc() {
@@ -1128,18 +1159,18 @@ async function menuReset() {
 }
 
 async function resetTo(sha) {
-  if (!confirm('确定回退到 ' + sha.slice(0, 7) + '？当前未提交的更改将丢失。')) return;
-  const r = await apiFetch('/git/reset', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId, sha: sha }) });
-  if (r && r.ok) {
-    closeModal();
-    if (editor.activeFilePath) {
-      const cur = await apiFetch('/files/' + editor.activeDocId + '/' + encodeURIComponent(editor.activeFilePath));
-      if (cur) { editor.content = cur.content; editor.unsaved = false; }
-    }
-    await loadGitData();
-    renderEditor();
-    toast('已回退到 ' + sha.slice(0, 7), 'ok');
-  } else toast('回退失败：' + (r ? r.error : ''), 'err');
+  showConfirm('回退版本（危险）', '确定回退到 ' + sha.slice(0, 7) + '？\n当前未提交的更改将丢失，此操作不可撤销。', async () => {
+    const r = await apiFetch('/git/reset', { method: 'POST', body: JSON.stringify({ doc_id: editor.activeDocId, sha: sha }) });
+    if (r && r.ok) {
+      if (editor.activeFilePath) {
+        const cur = await apiFetch('/files/' + editor.activeDocId + '/' + encodeURIComponent(editor.activeFilePath));
+        if (cur) { editor.content = cur.content; editor.unsaved = false; }
+      }
+      await loadGitData();
+      renderEditor();
+      toast('已回退到 ' + sha.slice(0, 7), 'ok');
+    } else toast('回退失败：' + (r ? r.error : ''), 'err');
+  });
 }
 
 // ── Layout ───────────────────────────────────────────────────
@@ -1914,7 +1945,7 @@ function renderEditor() {
       '<span id="veWordCount" title="字数（含空白符）"></span>' +
       '<span class="ms-auto" id="veCursorPos">第 1 行 1 列</span>' +
       '<span>VanillaEditor ' + VE_VERSION + '</span>' +
-      '<span id="veClock">' + new Date().toLocaleTimeString() + '</span>' +
+      '<span id="veClock"></span><button class="btn btn-sm py-0 d-md-none" onclick="toggleFullscreen()" title="全屏"><i class="bi bi-arrows-fullscreen"></i></button>' +
     '</div>';
 
   const ta = document.getElementById('veEditor');
@@ -2098,7 +2129,7 @@ async function renderSetting() {
     '</div>' +
     '<div class="ve-statusbar d-flex align-items-center gap-3 px-3 flex-shrink-0 small">' +
       '<span class="ms-auto">VanillaEditor ' + VE_VERSION + '</span>' +
-      '<span id="veClock">' + new Date().toLocaleTimeString() + '</span>' +
+      '<span id="veClock"></span><button class="btn btn-sm py-0 d-md-none" onclick="toggleFullscreen()" title="全屏"><i class="bi bi-arrows-fullscreen"></i></button>' +
     '</div>';
 
   const sc = document.getElementById('veSettingsMenuClose');
@@ -2545,7 +2576,43 @@ Router.register('#/setting', async () => {
 });
 
 // ── Init ─────────────────────────────────────────────────────
+let fullscreenRequested = false;
+
+function requestFullscreen() {
+  const el = document.documentElement;
+  if (el.requestFullscreen) el.requestFullscreen();
+  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  else if (el.msRequestFullscreen) el.msRequestFullscreen();
+}
+
+function exitFullscreen() {
+  if (document.exitFullscreen) document.exitFullscreen();
+  else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+  else if (document.msExitFullscreen) document.msExitFullscreen();
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) requestFullscreen();
+  else exitFullscreen();
+}
+
+// 首次触摸/点击时自动请求全屏（移动端），避免页面被浏览器地址栏遮挡
+function initFullscreenOnFirstTouch() {
+  if (fullscreenRequested) return;
+  const handler = () => {
+    if (window.innerWidth < 992) {
+      requestFullscreen();
+      fullscreenRequested = true;
+    }
+    document.removeEventListener('touchstart', handler);
+    document.removeEventListener('click', handler);
+  };
+  document.addEventListener('touchstart', handler, { once: true });
+  document.addEventListener('click', handler, { once: true });
+}
+
 applyTheme();
+initFullscreenOnFirstTouch();
 window.addEventListener('error', e => console.error('[VE Error]', e.message));
 if (!location.hash) location.hash = auth.isLoggedIn ? '#/editor' : '#/login';
 Router.render();

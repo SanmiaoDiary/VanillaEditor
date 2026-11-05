@@ -47,6 +47,12 @@
 
 ## 二、设计已定、待实现（新增功能）
 
+**工作区流程对齐：**
+- [x] 工作区不存在时自动创建（DESIGN 4.3.1）✅ v0.3.6 — `git_service.ensure_repo()` 在源目录内 git init
+- [x] 工作区已有 .git 时复用（DESIGN 4.3.1）✅ v0.3.6 — `repo_exists()` 检测注册表，已存在则跳过
+- [x] 关闭工作区时强制 commit 未提交更改（DESIGN 4.3.3）✅ v0.3.3
+- [x] 原地模式改造（DESIGN 4.2.1.2/4.3）✅ v0.3.6 — 工作区注册表（`data/<user>/workspaces.json`），打开时在源目录 init .git，编辑直接写源文件，data/ 不存副本；旧复制模式遗留数据惰性迁移
+
 **编辑器面板：**
 - [ ] 同步面板（见上 9）
 - [ ] 扩展面板（DESIGN 3.3.4）：内置扩展开关（字数统计/图片粘贴/自动保存/拼写检查）+「从 zip 安装」占位；依赖 4.8 扩展系统
@@ -87,25 +93,11 @@
 - [ ] 同步锁机制 — `data/locks/<remote>.lock`（DESIGN 7.5.1）
 - [ ] 自动推送逻辑 — 每次保存后 push 到默认远端（DESIGN 4.4.2）——**v0.3.1 已有开关 UI，逻辑待实现**
 
-**工作区流程对齐：**
-- [ ] 工作区不存在时自动创建（DESIGN 4.3.1）
-- [ ] 工作区已有 .git 时复用（DESIGN 4.3.1）
-- [ ] 关闭工作区时强制 commit 未提交更改（DESIGN 4.3.3）
-
 ## 三、代码与架构决策不符（v0.3.0 定案，待改造）
 
-- [ ] **工作区复制模式 → 原地模式**（DESIGN 4.2.1.2 注 5、4.3）
-  现状：`app/routes.py` workspace_open 将目录内容 `shutil.copy2` 复制到 `data/<用户>/<doc_id>/`，编辑在副本上进行
-  目标：直接在用户选定目录工作（检测/初始化其中 `.git`），`data/` 不存副本
-  涉及：`/api/workspaces` POST、`/api/files` PUT（删除写回逻辑）、`/api/workspaces` GET/DELETE
-
-- [ ] **`.ve_workspace` → `.ve/ve_workspace.json`**（DESIGN 4.2.1.2 注 3、4.3.2）
-  现状：工作区根目录写 `.ve_workspace` 单文件（含 source_path）
-  目标：工作区状态与配置统一存 `.ve/ve_workspace.json`；原地模式下不再需要 source_path
-
-- [ ] **删除写回逻辑**（DESIGN 10.1）
-  现状：`app/routes.py` 约 205 行 PUT /api/files 时检测 `.ve_workspace` 并写回 source_path
-  目标：原地模式下直接写入工作区源文件，无写回分支
+- [x] **工作区复制模式 → 原地模式**（DESIGN 4.2.1.2 注 5、4.3）✅ v0.3.6
+- [x] **`.ve_workspace` → `.ve/ve_workspace.json`**（DESIGN 4.2.1.2 注 3、4.3.2）✅ v0.3.3
+- [x] **删除写回逻辑**（DESIGN 10.1）✅ v0.3.6 — 原地模式直接写入源文件，无写回分支
 
 - [ ] **账号存储 users.json → config.db**（DESIGN 4.1.1、第 5 章，规划中）
 - [ ] **多用户权限体系**（DESIGN 4.1.1.1，当前代码无角色概念）

@@ -729,62 +729,95 @@ def create_app():
         with open(_workspace_config_path(repo_path), "w", encoding="utf-8") as f:
             _json.dump(cfg, f, ensure_ascii=False)
 
+    def _migrate_legacy_workspaces(username):
+        """惰性迁移：把旧复制模式留下的 data/<user>/ws_*/.ve/ve_workspace.json
+        注册进 workspaces.json（原地模式注册表）。旧副本目录保留不动，避免误删数据。"""
+        user_dir = os.path.join(app.config["DATA_DIR"], username)
+        if not os.path.isdir(user_dir):
+            return
+        reg = git_service.load_registry(username)
+        changed = False
+        for item in os.listdir(user_dir):
+            item_path = os.path.join(user_dir, item)
+            if not item.startswith("ws_") or not os.path.isdir(item_path):
+                continue
+            if item in reg:
+                continue
+            cfg = _read_workspace_config(item_path)
+            src = cfg.get("source_path", "")
+            if src and os.path.isdir(src):
+                reg[item] = {
+                    "name": cfg.get("name", item),
+                    "source_path": src,
+                    "migrated_from": item_path,
+                }
+                changed = True
+        if changed:
+            git_service.save_registry(username, reg)
+
     @app.route("/api/workspaces", methods=["GET"])
     @require_auth
     def workspaces_list():
         username = g.username
-        user_dir = os.path.join(app.config["DATA_DIR"], username)
+        _migrate_legacy_workspaces(username)
+        reg = git_service.load_registry(username)
         workspaces = []
-        if os.path.isdir(user_dir):
-            for item in sorted(os.listdir(user_dir)):
-                item_path = os.path.join(user_dir, item)
-                if not os.path.isdir(item_path):
-                    continue
-                repo_path = os.path.join(item_path, ".git") if os.path.isdir(os.path.join(item_path, ".git")) else item_path
-                cfg = _read_workspace_config(item_path)
-                workspaces.append({
-                    "id": item,
-                    "name": cfg.get("name", item),
-                    "source_path": cfg.get("source_path", ""),
-                    "type": "workspace",
-                })
+        for item in sorted(reg.keys()):
+            entry = reg[item]
+            src = entry.get("source_path", "")
+            workspaces.append({
+                "id": item,
+                "name": entry.get("name", item),
+                "source_path": src,
+                "type": "workspace",
+                "available": os.path.isdir(src),
+            })
         return jsonify(workspaces)
 
     @app.route("/api/workspaces", methods=["POST"])
     @require_auth
     def workspace_open():
+        """原地模式（DESIGN 4.3.1）：直接在用户选定目录工作，
+        已含 .git 则复用、否则在其中 git init；不复制任何数据到 data/。"""
         username = g.username
         data = request.get_json() or {}
         source_path = os.path.normpath(data.get("path", ""))
         if not source_path or not os.path.isdir(source_path):
             return jsonify({"error": "目录不存在"}), 400
-        # 安全校验：排除系统目录
         real = os.path.realpath(source_path)
-        forbidden = ["/", os.sep]
-        if sys.platform == "win32" and len(real) >= 2 and real[1] == ":":
-            forbidden = [real[:2]]
-        for fp in forbidden:
-            if real == fp or (fp != "/" and real.startswith(fp + os.sep)):
-                pass  # allow user-specified paths
+        # data/ 自身不允许作为工作区（防止注册表/用户数据被当作工作区内容提交）
+        data_real = os.path.realpath(app.config["DATA_DIR"])
+        if real == data_real or real.startswith(data_real + os.sep):
+            return jsonify({"error": "不能将 VE 数据目录本身作为工作区"}), 400
         doc_id = "ws_" + real.replace(os.sep, "_").replace(":", "_").replace(" ", "_").lower()
-        repo_path = git_service.ensure_repo(username, doc_id)
-        # 写入工作区配置（新格式：.ve/ve_workspace.json）
+        # 在源目录内初始化/复用 Git 仓库（原地模式核心）
+        git_service.save_registry(username, {**git_service.load_registry(username),
+                                             doc_id: {"name": os.path.basename(real), "source_path": real}})
+        git_service.ensure_repo(username, doc_id)
+        # 写入工作区配置 .ve/ve_workspace.json（幂等：已存在则保留 UI 状态）
         import json as _json
-        ws_cfg = {
+        cfg_path = _workspace_config_path(real)
+        if os.path.isfile(cfg_path):
+            try:
+                ws_cfg = _json.load(open(cfg_path, encoding="utf-8"))
+            except Exception:
+                ws_cfg = {}
+        else:
+            ws_cfg = {"ui": {}}
+        ws_cfg.update({
             "name": os.path.basename(real),
             "source_path": real,
             "opened_by": username,
-            "opened_at": datetime.now(timezone.utc).isoformat(),
-            "ui": {},  # 预留 UI 状态（标签页、展开状态等）
-        }
-        os.makedirs(os.path.join(repo_path, ".ve"), exist_ok=True)
-        with open(_workspace_config_path(repo_path), "w", encoding="utf-8") as f:
+            "opened_at": ws_cfg.get("opened_at") or datetime.now(timezone.utc).isoformat(),
+        })
+        os.makedirs(os.path.join(real, ".ve"), exist_ok=True)
+        with open(cfg_path, "w", encoding="utf-8") as f:
             _json.dump(ws_cfg, f, ensure_ascii=False, indent=2)
-        # 原有 .ve_workspace 自动迁移为新格式（如果存在）
-        legacy = _legacy_workspace_config_path(repo_path)
+        # 历史兼容：源目录残留旧 .ve_workspace 单文件则迁移
+        legacy = _legacy_workspace_config_path(real)
         if os.path.isfile(legacy):
             try:
-                _migrate_workspace_config(repo_path, _json.load(open(legacy, encoding="utf-8")))
+                _migrate_workspace_config(real, _json.load(open(legacy, encoding="utf-8")))
                 os.remove(legacy)
             except Exception:
                 pass
@@ -793,12 +826,12 @@ def create_app():
     @app.route("/api/workspaces/<doc_id>", methods=["DELETE"])
     @require_auth
     def workspace_close(doc_id):
+        """关闭工作区（DESIGN 4.3.3）：有未提交更改先自动 commit，
+        然后仅删除注册记录与源目录中的 .ve 配置——绝不删除源目录本身。"""
         username = g.username
-        doc_path = os.path.normpath(os.path.join(app.config["DATA_DIR"], username, doc_id))
-        base = os.path.normpath(os.path.join(app.config["DATA_DIR"], username))
-        if not doc_path.startswith(base + os.sep):
-            return jsonify({"error": "非法路径"}), 400
-        # 有未提交更改时先自动保存
+        reg = git_service.load_registry(username)
+        entry = reg.get(doc_id)
+        # 未提交更改先自动保存
         try:
             changed = git_service.status(username, doc_id)
             if changed:
@@ -806,11 +839,17 @@ def create_app():
                 git_service.commit(username, doc_id, "save before close")
         except Exception:
             pass
-        if os.path.isdir(doc_path):
-            try:
-                _force_rmtree(doc_path)
-            except OSError as e:
-                return jsonify({"error": f"删除失败：{e}"}), 500
+        # 删除源目录中的 .ve 配置（原地模式）
+        if entry and entry.get("source_path"):
+            ve_dir = os.path.join(entry["source_path"], ".ve")
+            if os.path.isdir(ve_dir):
+                try:
+                    _force_rmtree(ve_dir)
+                except OSError:
+                    pass
+        # 仅删除注册记录，源目录与其 .git 保持原样
+        reg.pop(doc_id, None)
+        git_service.save_registry(username, reg)
         return jsonify({"ok": True})
 
     @app.route("/api/workspace/save", methods=["POST"])

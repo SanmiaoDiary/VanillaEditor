@@ -4,6 +4,32 @@ All notable changes to VanillaEditor will be documented in this file.
 
 ---
 
+## [v0.3.6] - 2026-11-05
+
+### Security
+- **原地工作区改造**（DESIGN 4.2.1.2/4.3）：
+  - `app/git/service.py` 新增工作区注册表（`data/<user>/workspaces.json`）
+  - `POST /api/workspaces` 直接在源目录 init `.git`，不复制数据到 `data/`
+  - `GET /api/files` / `PUT /api/files` 直接读写源目录文件（无写回逻辑）
+  - `DELETE /api/workspaces` 仅删除注册记录 + 源目录 `.ve/` 配置，保留源文件
+  - 旧复制模式遗留数据通过 `_migrate_legacy_workspaces()` 惰性迁移
+
+### Added
+- **模态框替代原生弹窗**（DESIGN 3.7 规范 1、2）：
+  - 新增 `showConfirm()` / `showInput()` 封装
+  - 关闭工作区/新建文件/新建文件夹/另存为/删除文档/回退版本全部改用模态框
+  - 危险操作（删除/回退/关闭工作区）使用红色警示按钮
+  - 保留查找/替换的 `prompt()`（简单输入场景，设计可接受）
+- **手机端全屏**（DESIGN 3.1 备注 1、3.6 第 7 条）：
+  - 首次触摸/点击时自动请求全屏（`initFullscreenOnFirstTouch()`）
+  - 状态栏新增全屏切换按钮（仅移动端显示）
+
+### Changed
+- 工作区打开时：源目录存在 `.git` 则复用，否则 `git init --initial-branch=main`
+- 工作区关闭时：先自动 commit 未提交更改（`save before close`）
+
+---
+
 ## [v0.3.5] - 2026-11-05
 
 ### Security
