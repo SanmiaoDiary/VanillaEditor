@@ -2639,3 +2639,69 @@ Router.render();
 window.addEventListener('resize', () => {
   if (location.hash === '#/editor') applyMobilePreviewState();
 });
+
+// ── 右键上下文菜单（编辑器）──────────────────────────────────────
+let ctxMenuVisible = false;
+
+function showContextMenu(x, y) {
+  let menu = document.getElementById('veCtxMenu');
+  if (!menu) {
+    menu = document.createElement('div');
+    menu.id = 'veCtxMenu';
+    menu.className = 've-context-menu';
+    menu.innerHTML =
+      '<div class="ve-ctx-item" data-action="cut" title="剪切 (Ctrl+X)"><i class="bi bi-scissors"></i> 剪切</div>' +
+      '<div class="ve-ctx-item" data-action="copy" title="复制 (Ctrl+C)"><i class="bi bi-copy"></i> 复制</div>' +
+      '<div class="ve-ctx-item" data-action="paste" title="粘贴 (Ctrl+V)"><i class="bi bi-clipboard"></i> 粘贴</div>' +
+      '<div class="ve-ctx-divider"></div>' +
+      '<div class="ve-ctx-item" data-action="undo" title="撤销 (Ctrl+Z)"><i class="bi bi-arrow-counterclockwise"></i> 撤销</div>' +
+      '<div class="ve-ctx-item" data-action="redo" title="重做 (Ctrl+Y)"><i class="bi bi-arrow-clockwise"></i> 重做</div>';
+    document.body.appendChild(menu);
+    menu.addEventListener('click', handleContextMenuClick);
+  }
+  // 定位：确保不超出视口
+  const mw = menu.offsetWidth || 160;
+  const mh = menu.offsetHeight || 180;
+  const wx = Math.min(x, window.innerWidth - mw - 10);
+  const wy = Math.min(y, window.innerHeight - mh - 10);
+  menu.style.left = wx + 'px';
+  menu.style.top = wy + 'px';
+  menu.classList.add('show');
+  ctxMenuVisible = true;
+}
+
+function hideContextMenu() {
+  const menu = document.getElementById('veCtxMenu');
+  if (menu) menu.classList.remove('show');
+  ctxMenuVisible = false;
+}
+
+function handleContextMenuClick(e) {
+  const item = e.target.closest('.ve-ctx-item');
+  if (!item) return;
+  const action = item.dataset.action;
+  const ta = document.getElementById('veEditor');
+  if (!ta) { hideContextMenu(); return; }
+  ta.focus();
+  switch (action) {
+    case 'cut': execCmd('cut'); break;
+    case 'copy': execCmd('copy'); break;
+    case 'paste': execCmd('paste'); break;
+    case 'undo': execCmd('undo'); break;
+    case 'redo': execCmd('redo'); break;
+  }
+  hideContextMenu();
+}
+
+// 全局：点击其他地方关闭菜单
+document.addEventListener('click', () => hideContextMenu());
+document.addEventListener('contextmenu', e => {
+  // 仅在编辑器 textarea 内右击时显示自定义菜单
+  const ta = document.getElementById('veEditor');
+  if (ta && ta.contains(e.target)) {
+    e.preventDefault();
+    showContextMenu(e.clientX, e.clientY);
+  } else {
+    hideContextMenu();
+  }
+});

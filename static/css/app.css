@@ -132,3 +132,41 @@ body { overflow: hidden; }
 .ve-ws-item:hover { background: var(--bs-tertiary-bg); }
 /* 模态框水平+垂直居中 */
 #veModal .modal-dialog { margin: 1.75rem auto !important; }
+
+/* ── 右键上下文菜单 ───────────────────────────────────────────── */
+.ve-context-menu {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+  min-width: 160px;
+  display: none;
+}
+.ve-context-menu.show {
+  display: block;
+}
+.ve-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--bs-body-color);
+  transition: background .1s;
+}
+.ve-ctx-item:hover {
+  background: var(--bs-tertiary-bg);
+}
+.ve-ctx-item i {
+  font-size: 15px;
+  color: var(--bs-secondary-color);
+}
+.ve-ctx-divider {
+  height: 1px;
+  background: var(--bs-border-color);
+  margin: 4px 0;
+}
