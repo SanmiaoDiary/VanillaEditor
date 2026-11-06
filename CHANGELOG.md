@@ -4,6 +4,16 @@ All notable changes to VanillaEditor will be documented in this file.
 
 ---
 
+## [v0.3.7] - 2026-11-06
+
+### Added
+- **编辑器右键自定义菜单**：在编辑器 textarea 内右击时显示自定义菜单（剪切/复制/粘贴/撤销/重做），隐藏浏览器默认菜单；每项标注对应快捷键，悬停高亮，点击后自动关闭
+
+### Fixed
+- **布局切换仅预览区不生效**：`preview-only` 模式下编辑区加 `d-none` 隐藏，预览面板正常渲染并占满主区域；`editor-only` 模式预览不渲染
+
+---
+
 ## [v0.3.6] - 2026-11-05
 
 ### Security
