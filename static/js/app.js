@@ -1925,7 +1925,7 @@ function renderEditor() {
           ) +
         '</div>' +
         '<div class="ve-split">' +
-          '<div class="pane d-flex flex-column ve-edp" id="veEditorPane">' +
+          '<div class="pane d-flex flex-column ve-edp' + (layoutMode === 'preview-only' ? ' d-none' : '') + '" id="veEditorPane">' +
             '<div class="ve-editor-area">' +
               '<div class="ve-lngutter"><div class="ve-lngutter-inner" id="veLnNums"></div></div>' +
               '<div class="ve-editor-scroll">' +
@@ -1934,8 +1934,9 @@ function renderEditor() {
               '</div>' +
             '</div>' +
           '</div>' +
-          (layoutMode === 'preview-only' || layoutMode === 'default' ? '<div class="ve-resizer ve-resizer-v d-none d-md-block" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' +
-           '<div class="pane ve-preview" id="vePreview"><div class="ve-scroll">' + parseMd(editor.content || '') + '</div></div>' : '') +
+          (layoutMode !== 'editor-only' ?
+            (layoutMode === 'default' ? '<div class="ve-resizer ve-resizer-v d-none d-md-block" id="veSplitResizer" title="拖动调整编辑/预览宽度"></div>' : '') +
+            '<div class="pane ve-preview" id="vePreview"><div class="ve-scroll">' + parseMd(editor.content || '') + '</div></div>' : '') +
         '</div>' +
       '</main>' +
     '</div>' +
@@ -1988,12 +1989,30 @@ function renderEditor() {
     ta.addEventListener('keyup', updateCursorPos);
     ta.addEventListener('click', updateCursorPos);
     ta.addEventListener('keydown', e => {
-      if (e.key !== 'Tab') return;
-      e.preventDefault();
-      const s = ta.selectionStart, en = ta.selectionEnd;
-      ta.value = ta.value.slice(0, s) + '  ' + ta.value.slice(en);
-      ta.selectionStart = ta.selectionEnd = s + 2;
-      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      // Tab 缩进（保留）
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const s = ta.selectionStart, en = ta.selectionEnd;
+        ta.value = ta.value.slice(0, s) + '  ' + ta.value.slice(en);
+        ta.selectionStart = ta.selectionEnd = s + 2;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+      // 快捷键（DESIGN 4.7）
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key.toLowerCase()) {
+          case 's': e.preventDefault(); saveNow(); return;
+          case 'b': e.preventDefault(); insertBold(); return;
+          case 'i': e.preventDefault(); insertItalic(); return;
+          case 'k': e.preventDefault(); insertLink(); return;
+          case 'z': e.preventDefault(); execCmd('undo'); return;
+          case 'y': e.preventDefault(); execCmd('redo'); return;
+          case 'f': e.preventDefault(); execFind(); return;
+          case 'h': e.preventDefault(); execReplace(); return;
+          case 'w': e.preventDefault(); closeActiveTab(); return;
+          case 'o': e.preventDefault(); openWorkspaceModal(); return;
+        }
+      }
     });
     const lnEl = document.getElementById('veLnNums');
     ta.addEventListener('scroll', () => {
