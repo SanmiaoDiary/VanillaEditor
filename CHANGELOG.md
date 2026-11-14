@@ -4,6 +4,28 @@ All notable changes to VanillaEditor will be documented in this file.
 
 ---
 
+## [v0.4.0] - 2026-11-14
+
+> 基于双实例（Windows + WSL）端到端同步实测发现的问题批量修复。
+
+### Added
+- **访问码与二次认证口令拆分**（DESIGN 4.5.1）：`access_code`（登录访问码，开启远程访问时自动生成，可重新生成）与 `auth_code`（二次认证口令，用户自定义 ≥4 位）成为两个独立凭据；开启远程访问不再覆盖用户口令；首次开启无口令时后端 401 引导、前端弹出设置模态框；`GET /api/access/status` 新增 `has_auth_code`
+
+### Fixed
+- **首次推送/拉取必失败**：`push_to`/`pull_from` 显式携带当前分支名，首次推送 `-u` 建立 upstream；裸 `push`/`pull` 无 upstream 时回退第一个远端（DESIGN 7.2）
+- **新设备首次拉取被 `.ve` 挡死**：`.ve/` 为设备本地配置不再入库（DESIGN 4.3.2）——新建仓库自动写入 `.gitignore`；历史仓库打开时自动 `rm --cached` 迁移提交
+- **默认配置下浏览器无法首次打开**：远程访问关闭时的本地判定补充 `remote_addr` 依据（浏览器顶级导航 GET 不携带 Origin/Referer 头，此前被误判为远程而 403，静态资源同样被拦）
+- **访问码可绕过**：远程访问开启时远程来源登录**必填**访问码（此前不传字段即跳过校验）；本机来源豁免
+- **冲突文件名八进制乱码**：`_git()` 统一注入 `core.quotepath=false`，中文文件名正常显示
+- **Linux 下 debug 模式启动失败**：reloader 子进程跳过端口二次探测（父进程已绑定会被误判"端口被占用"，DESIGN 8.3）
+- **同步面板/设置页显示内部 doc_id**：状态总览卡改用工作区名，徽章允许换行不再重叠
+- **刚登录误显"未保存 \*"**：持久化恢复不再采纳 unsaved 状态
+- **WSL 下"本机局域网 IP"错误**：改用 UDP connect 路由探测（此前 `gethostbyname(hostname)` 在 WSL 解析到 127.0.1.1）
+- **首次提交 message 前缀**：`PUT /api/files` 首次提交使用 `init:` 前缀（对齐 DESIGN 4.4.2，此前全部为 `update:`）
+- **口令输错被登出**：`apiFetch` 将 `/access/*` 的 401 视为业务拒绝（就地提示），不再触发登出跳转
+
+---
+
 ## [v0.3.7] - 2026-11-06
 
 ### Added
