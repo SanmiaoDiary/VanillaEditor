@@ -13,7 +13,7 @@ All notable changes to VanillaEditor will be documented in this file.
 
 ### Fixed
 - **首次推送/拉取必失败**：`push_to`/`pull_from` 显式携带当前分支名，首次推送 `-u` 建立 upstream；裸 `push`/`pull` 无 upstream 时回退第一个远端（DESIGN 7.2）
-- **新设备首次拉取被 `.ve` 挡死**：`.ve/` 为设备本地配置不再入库（DESIGN 4.3.2）——新建仓库自动写入 `.gitignore`；历史仓库打开时自动 `rm --cached` 迁移提交
+- **新设备首次拉取被 `.ve` 挡死**：`.ve/` 为设备本地配置不再入库（DESIGN 4.3.2）——新建仓库将排除规则写入 `.git/info/exclude`（仓库本地、不入库）；历史仓库打开时自动 `rm --cached` 迁移提交
 - **默认配置下浏览器无法首次打开**：远程访问关闭时的本地判定补充 `remote_addr` 依据（浏览器顶级导航 GET 不携带 Origin/Referer 头，此前被误判为远程而 403，静态资源同样被拦）
 - **访问码可绕过**：远程访问开启时远程来源登录**必填**访问码（此前不传字段即跳过校验）；本机来源豁免
 - **冲突文件名八进制乱码**：`_git()` 统一注入 `core.quotepath=false`，中文文件名正常显示

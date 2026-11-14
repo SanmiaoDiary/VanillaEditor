@@ -56,28 +56,32 @@ class GitService:
         _, email, _ = self._git(repo_path, "config", "user.email")
         if not email.strip():
             self._git(repo_path, "config", "user.email", f"{username}@vanilla.local")
-        self._ensure_gitignore(repo_path)
+        self._ensure_local_exclude(repo_path)
         return repo_path
 
-    _GITIGNORE_REQUIRED = (".ve/",)
+    _LOCAL_EXCLUDE_REQUIRED = (".ve/",)
 
-    def _ensure_gitignore(self, repo_path):
-        """保证 .gitignore 包含 .ve/（设备本地配置不入库，DESIGN 4.3.2）；
-        已有 .gitignore 时仅追加缺失行，不覆盖用户内容"""
-        gi_path = os.path.join(repo_path, ".gitignore")
+    def _ensure_local_exclude(self, repo_path):
+        """保证仓库本地排除规则包含 .ve/（DESIGN 4.3.2）。
+        写入 `.git/info/exclude` 而非 .gitignore：排除规则本身属于设备本地配置，
+        入库会在新设备首拉时与远端历史中的同名文件冲突（untracked overwritten），
+        与 .ve 同类问题；info/exclude 天然不入库、无此冲突。幂等追加缺失行。"""
+        exclude_dir = os.path.join(repo_path, ".git", "info")
+        exclude_path = os.path.join(exclude_dir, "exclude")
         try:
+            os.makedirs(exclude_dir, exist_ok=True)
             existing = ""
-            if os.path.isfile(gi_path):
-                with open(gi_path, encoding="utf-8") as f:
+            if os.path.isfile(exclude_path):
+                with open(exclude_path, encoding="utf-8") as f:
                     existing = f.read()
-            missing = [line for line in self._GITIGNORE_REQUIRED
+            missing = [line for line in self._LOCAL_EXCLUDE_REQUIRED
                        if line not in existing.splitlines()]
             if not missing:
                 return
-            with open(gi_path, "a", encoding="utf-8") as f:
+            with open(exclude_path, "a", encoding="utf-8") as f:
                 if existing and not existing.endswith("\n"):
                     f.write("\n")
-                f.write("\n# VanillaEditor 设备本地配置（不入库，DESIGN 4.3.2）\n")
+                f.write("# VanillaEditor 设备本地配置（不入库，DESIGN 4.3.2）\n")
                 for line in missing:
                     f.write(line + "\n")
         except OSError:
@@ -89,8 +93,7 @@ class GitService:
         if code != 0 or not out.strip():
             return False
         self._git(repo_path, "rm", "-r", "--cached", "--quiet", ".ve")
-        self._ensure_gitignore(repo_path)
-        self._git(repo_path, "add", ".gitignore")
+        self._ensure_local_exclude(repo_path)
         # -c 内联身份：旧仓库可能未配置 user.name/email
         self._git(repo_path, "-c", "user.name=vanilla", "-c", "user.email=vanilla@local",
                   "commit", "-m", "chore: untrack .ve device-local config")
@@ -108,7 +111,7 @@ class GitService:
         repo_path = self._repo_path(username, doc_id)
         if not os.path.isdir(os.path.join(repo_path, ".git")):
             return self.init_repo(username, doc_id)
-        self._ensure_gitignore(repo_path)
+        self._ensure_local_exclude(repo_path)
         self._untrack_ve_if_tracked(repo_path)
         return repo_path
 
