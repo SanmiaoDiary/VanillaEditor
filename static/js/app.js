@@ -50,7 +50,8 @@ async function apiFetch(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (auth.token) headers['Authorization'] = 'Bearer ' + auth.token;
   const res = await fetch('/api' + path, { ...opts, headers });
-  const isAuthForm = path === '/auth/login' || path === '/auth/init';
+  // 401 时跳登录；但登录注册与远程访问口令验证的 401 属业务拒绝，就地提示而非登出
+  const isAuthForm = path === '/auth/login' || path === '/auth/init' || path.startsWith('/access/');
   if (res.status === 401 && !isAuthForm) { auth.logout(); Router.go('#/login'); return null; }
   if (!res.ok) {
     let msg = '请求失败（' + res.status + '）';
@@ -2491,6 +2492,12 @@ async function saveAuthCode() {
 
 async function toggleAccess(enabled) {
   const auth2 = accessStatusCache && accessStatusCache.auth2_enabled !== false;
+  // 首次开启且从未设置认证口令：直接引导设置（DESIGN 4.5.1）
+  if (auth2 && enabled && accessStatusCache && !accessStatusCache.has_auth_code) {
+    toast('请先设置认证口令', 'err');
+    menuAuthCode();
+    return;
+  }
   if (auth2) {
     // 二次认证：先弹模态框验证口令（开启和关闭都需要）
     showModal('二次认证确认',
@@ -2514,7 +2521,7 @@ async function doToggleAccess(enabled, authCode) {
   try {
     if (enabled) {
       const r = await apiFetch('/access/enable', { method: 'POST', body: JSON.stringify({ auth_code: authCode }) });
-      if (r) { closeModal(); toast('远程访问已开启', 'ok'); }
+      if (r) { closeModal(); toast('远程访问已开启，访问码：' + r.access_code, 'ok'); }
     } else {
       const auth2 = accessStatusCache && accessStatusCache.auth2_enabled !== false;
       const r = await apiFetch('/access/disable', { method: 'POST', body: JSON.stringify(auth2 ? { auth_code: authCode } : {}) });
@@ -2523,6 +2530,8 @@ async function doToggleAccess(enabled, authCode) {
     loadAccessControl();
   } catch (e) {
     toast(e.message || '操作失败', 'err');
+    // 未设置口令被后端 401 拒绝：引导打开口令设置模态框
+    if (e.message && e.message.includes('请先设置认证口令')) menuAuthCode();
     loadAccessControl();
   }
 }

@@ -156,11 +156,11 @@ def create_app():
         access_code = data.get("access_code", "")
         if not username or not password:
             return jsonify({"error": "用户名和密码不能为空"}), 400
-        # 远程访问开启时校验访问码
-        if access_code:
-            ra = _load_remote_access()
-            if ra.get("enabled") and access_code != ra.get("access_code", ""):
-                return jsonify({"error": "访问码错误"}), 401
+        # 远程访问开启时：远程来源必须携带访问码（本机来源豁免，DESIGN 4.5.1）
+        ra = _load_remote_access()
+        if ra.get("enabled") and not _is_local_request():
+            if access_code != ra.get("access_code", ""):
+                return jsonify({"error": "访问码错误或未填写"}), 401
         users = _load_users()
         user = users.get(username)
         if not user or not bcrypt.checkpw(password.encode(), user["password_hash"].encode()):
@@ -185,9 +185,7 @@ def create_app():
         cfg = _load_remote_access()
         # 仅当远程访问开启且不是本地访问时才显示访问码字段
         enabled = cfg.get("enabled", False)
-        origin = request.headers.get("Origin", "")
-        is_local = any(host in origin for host in ["http://127.0.0.1", "http://[::1]", "http://localhost"])
-        return jsonify({"remote_access": enabled, "is_local": is_local})
+        return jsonify({"remote_access": enabled, "is_local": _is_local_request()})
 
     # ── /api/docs ─────────────────────────────────────────────
 
@@ -522,18 +520,57 @@ def create_app():
     def _load_remote_access():
         p = _remote_access_path()
         if not os.path.exists(p):
-            return {"enabled": False, "allowed_ips": [], "access_code": ""}
+            return {"enabled": False, "allowed_ips": [], "access_code": "", "auth_code": ""}
         import json as _json
         try:
             with open(p, encoding="utf-8") as f:
-                return _json.load(f)
+                cfg = _json.load(f)
         except Exception:
-            return {"enabled": False, "allowed_ips": [], "access_code": ""}
+            cfg = {}
+        # v0.4.0：访问码（登录用）与认证口令（二次认证用）拆分，旧配置补默认值
+        cfg.setdefault("enabled", False)
+        cfg.setdefault("allowed_ips", [])
+        cfg.setdefault("access_code", "")
+        cfg.setdefault("auth_code", "")
+        return cfg
 
     def _save_remote_access(cfg):
         import json as _json
         with open(_remote_access_path(), "w", encoding="utf-8") as f:
             _json.dump(cfg, f, ensure_ascii=False)
+
+    _LOCAL_HEADERS = (
+        "http://127.0.0.1", "http://localhost", "http://[::1]",
+        "https://127.0.0.1", "https://localhost", "https://[::1]",
+    )
+
+    def _is_local_request():
+        """本地请求判定（DESIGN 4.5.1）：来源 IP 为回环，或 Origin/Referer 指向本地，任一命中即本地。
+        仅凭 Origin/Referer 判断不可靠——浏览器顶级导航 GET（地址栏/书签/start 命令）不携带这些头。"""
+        if request.remote_addr in ("127.0.0.1", "::1", "localhost"):
+            return True
+        origin = request.headers.get("Origin", "")
+        referer = request.headers.get("Referer", "")
+        return (any(h in origin for h in _LOCAL_HEADERS)
+                or any(h in referer for h in _LOCAL_HEADERS))
+
+    def _get_lan_ip():
+        """局域网 IP：UDP connect 路由探测（不实际发包，DESIGN 4.5.3）；
+        失败回退主机名解析，再回退 127.0.0.1。不用 gethostbyname(hostname)——
+        WSL 等环境主机名会解析到 127.0.1.1 等回环地址。"""
+        import socket as _socket
+        try:
+            s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+            try:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+            finally:
+                s.close()
+        except Exception:
+            try:
+                return _socket.gethostbyname(_socket.gethostname())
+            except Exception:
+                return "127.0.0.1"
 
     # ── 远程访问访问控制：关闭时仅允许本地请求 ───────────────────
     @app.before_request
@@ -541,22 +578,10 @@ def create_app():
         """远程访问关闭时，拒绝非本地来源的请求（返回 403）"""
         cfg = _load_remote_access()
         if not cfg.get("enabled", False):
-            # 本地来源：localhost / 127.0.0.1 / [::1]
-            origin = request.headers.get("Origin", "")
-            referer = request.headers.get("Referer", "")
-            is_local_origin = any(h in origin for h in [
-                "http://127.0.0.1", "http://localhost", "http://[::1]",
-                "https://127.0.0.1", "https://localhost", "https://[::1]"
-            ])
-            is_local_referer = any(h in referer for h in [
-                "http://127.0.0.1", "http://localhost", "http://[::1]",
-                "https://127.0.0.1", "https://localhost", "https://[::1]"
-            ])
             # 允许公开接口（不检查来源）
             if request.endpoint == 'public_config':
                 return None
-            # 如果 Origin 或 Referer 指向本地，允许；否则拒绝
-            if not (is_local_origin or is_local_referer):
+            if not _is_local_request():
                 return jsonify({"error": "远程访问已关闭，仅允许本地访问"}), 403
         return None
 
@@ -593,12 +618,7 @@ def create_app():
     @require_auth
     def access_status():
         cfg = _load_remote_access()
-        import socket as _socket
-        try:
-            hostname = _socket.gethostname()
-            ip = _socket.gethostbyname(hostname)
-        except Exception:
-            ip = "127.0.0.1"
+        ip = _get_lan_ip()
         return jsonify({
             "enabled": cfg.get("enabled", False),
             "access_code": cfg.get("access_code", ""),
@@ -606,6 +626,7 @@ def create_app():
             "allowed_ips": cfg.get("allowed_ips", []),
             "url": f"http://{ip}:{app.config['PORT']}",
             "auth2_enabled": cfg.get("auth2_enabled", True),
+            "has_auth_code": bool(cfg.get("auth_code")),
         })
 
     @app.route("/api/access/enable", methods=["POST"])
@@ -613,25 +634,23 @@ def create_app():
     def access_enable():
         data = request.get_json() or {}
         cfg = _load_remote_access()
-        # 二次认证校验（默认开启）
+        # 二次认证校验（默认开启）：校验用户自定义认证口令（DESIGN 4.5.1）
         if cfg.get("auth2_enabled", True):
+            if not cfg.get("auth_code"):
+                return jsonify({"error": "请先设置认证口令（设置页 > 网络和安全）"}), 401
             auth_code = data.get("auth_code", "")
-            if auth_code != cfg.get("access_code", ""):
+            if auth_code != cfg.get("auth_code", ""):
                 return jsonify({"error": "认证口令错误"}), 401
         cfg["enabled"] = True
+        # 仅重新生成登录访问码；认证口令独立存储，不受开启操作影响
         import random as _random, string as _string
         cfg["access_code"] = "".join(_random.choices(_string.ascii_letters + _string.digits, k=6))
         if "allowed_ips" in data:
             cfg["allowed_ips"] = data["allowed_ips"]
         _save_remote_access(cfg)
-        import socket as _socket
-        try:
-            ip = _socket.gethostbyname(_socket.gethostname())
-        except Exception:
-            ip = "127.0.0.1"
         return jsonify({
             "ok": True,
-            "url": f"http://{ip}:{app.config['PORT']}",
+            "url": f"http://{_get_lan_ip()}:{app.config['PORT']}",
             "access_code": cfg["access_code"],
         })
 
@@ -640,10 +659,12 @@ def create_app():
     def access_disable():
         data = request.get_json() or {}
         cfg = _load_remote_access()
-        # 二次认证校验（默认开启）
+        # 二次认证校验（默认开启）：校验用户自定义认证口令
         if cfg.get("auth2_enabled", True):
+            if not cfg.get("auth_code"):
+                return jsonify({"error": "请先设置认证口令（设置页 > 网络和安全）"}), 401
             auth_code = data.get("auth_code", "")
-            if auth_code != cfg.get("access_code", ""):
+            if auth_code != cfg.get("auth_code", ""):
                 return jsonify({"error": "认证口令错误"}), 401
         cfg["enabled"] = False
         cfg["access_code"] = ""
@@ -674,12 +695,13 @@ def create_app():
         cfg = _load_remote_access()
         old_code = data.get("old_code", "")
         new_code = data.get("new_code", "")
-        if cfg.get("auth2_enabled", True):
-            if old_code != cfg.get("access_code", ""):
+        # 从未设置过口令（auth_code 为空）时免验旧口令，允许首次设置（DESIGN 4.5.1）
+        if cfg.get("auth2_enabled", True) and cfg.get("auth_code"):
+            if old_code != cfg.get("auth_code", ""):
                 return jsonify({"error": "旧口令错误"}), 401
         if not new_code or len(new_code) < 4:
             return jsonify({"error": "口令长度至少 4 位"}), 400
-        cfg["access_code"] = new_code
+        cfg["auth_code"] = new_code
         _save_remote_access(cfg)
         return jsonify({"ok": True})
 
