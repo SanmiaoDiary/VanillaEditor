@@ -12,6 +12,9 @@
 #   deploy/deploy.sh --update   # 更新代码并重启（保留 data/ 与工作区）
 set -euo pipefail
 
+# Git Bash/MSYS2 下禁止对路径类环境变量做自动转换（否则 /mnt/... 会被改写成 Git 安装路径）
+export MSYS2_ENV_CONV_EXCL="REMOTE_PATH LOCAL_PATH REMOTE_CMD TARGET_HOST DEPLOY_DIR"
+
 TARGET_HOST="${TARGET_HOST:?请 export TARGET_HOST=<服务器IP>}"
 SSH_USER="${SSH_USER:?请 export SSH_USER=<登录用户>}"
 SSH_PASS="${SSH_PASS:-}"
@@ -28,8 +31,9 @@ command -v "$PY" >/dev/null 2>&1 || PY="python"
   echo "本机 python 缺少 paramiko：请先执行 pip install paramiko"; exit 1; }
 export TARGET_HOST SSH_USER SSH_PASS
 
-r() { REMOTE_CMD="$1" "$PY" "$HERE/remote_exec.py" exec; }
-p() { LOCAL_PATH="$1" REMOTE_PATH="$2" "$PY" "$HERE/remote_exec.py" put; }
+EXEC_SCRIPT="$(cygpath -w "$HERE/remote_exec.py")"
+r() { REMOTE_CMD="$1" "$PY" "$EXEC_SCRIPT" exec; }
+p() { local lp; lp="$(cygpath -w "$1")"; MSYS_NO_PATHCONV=1 "$PY" "$EXEC_SCRIPT" put "$lp" "$2"; }
 
 echo "== [1/4] 只读探测（不做任何改动）=="
 r "echo '--- 系统/依赖 ---'; uname -srm; python3 --version 2>&1; git --version 2>&1; \
@@ -51,7 +55,17 @@ FLASK_SECRET_VAL=$(gen_secret)
 # 打包到项目目录（Windows 下 /tmp 路径对 python 进程不可见；.gitignore 已排除）
 TMP_TAR="$ROOT/_ve_deploy.tar.gz"
 git -C "$ROOT" archive "$BRANCH" -o "$TMP_TAR"
-r "mkdir -p '$DEPLOY_DIR/data' '$DEPLOY_DIR/workspaces' '$DEPLOY_DIR/repos'"
+
+MKDIR_CMD="mkdir -p '$DEPLOY_DIR/data' '$DEPLOY_DIR/workspaces' '$DEPLOY_DIR/repos'"
+if [ "$(r "test -w '$(dirname "$DEPLOY_DIR")' && echo Y || echo N")" = "Y" ]; then
+  r "$MKDIR_CMD"
+else
+  echo "父目录不可写，使用 sudo 创建（密码经 stdin/pty 传递，不落盘）"
+  export SUDO_PASS="$SSH_PASS"
+  # stty -echo 防止 pty 回显密码
+  r "stty -echo; sudo -S -p '[VE-SUDO]' mkdir -p '$DEPLOY_DIR' && sudo -S -p '[VE-SUDO]' chown '$SSH_USER:$SSH_USER' '$DEPLOY_DIR' && $MKDIR_CMD && stty echo"
+  unset SUDO_PASS
+fi
 p "$TMP_TAR" "$DEPLOY_DIR/_ve_deploy.tar.gz"
 p "$HERE/remote_setup.sh" "$DEPLOY_DIR/remote_setup.sh"
 rm -f "$TMP_TAR"
