@@ -4,6 +4,17 @@ All notable changes to VanillaEditor will be documented in this file.
 
 ---
 
+## [v0.4.1] - 2026-11-14
+
+### Added
+- **一键部署脚本**（deploy/，DESIGN 8.9 最小侵入部署）：探测式部署（不装系统包、缺依赖即停）、全部文件只进部署目录、用户级 systemd 优先 + crontab `@reboot` 兜底、SSH 凭据仅经环境变量传入不落盘；`--probe` / `--update` 模式；`deploy/README.md` 部署手册
+- **JWT_SECRET 生产检查**（DESIGN 8.4）：默认密钥启动打印醒目警告；`VE_REQUIRE_SECRET=1` 时拒绝启动
+
+### Fixed
+- DESIGN 第 8 章编号修正（原有两个 8.6）；`.gitattributes` 强制 shell 脚本 LF
+
+---
+
 ## [v0.4.0] - 2026-11-14
 
 > 基于双实例（Windows + WSL）端到端同步实测发现的问题批量修复。

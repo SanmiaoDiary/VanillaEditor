@@ -27,6 +27,12 @@
 
 ## 更新日志
 
+### v0.4.1 — 2026-11-14
+
+**feat:** 生产就绪物料——deploy/ 一键部署（最小侵入：探测式、文件只进部署目录、用户级 systemd/crontab、SSH 凭据不落盘）+ 部署手册；JWT_SECRET 默认值警告与 VE_REQUIRE_SECRET=1 强制检查（DESIGN 8.4）；requirements 含 gunicorn/waitress
+
+**chore:** DESIGN 8 章编号修正；.gitattributes 强制 .sh 为 LF
+
 ### v0.4.0 — 2026-11-14
 
 **feat:** 访问码与二次认证口令拆分（DESIGN 4.5.1 对齐）：access_code 登录用自动生成、auth_code 用户自定义独立存储，开启远程访问不再覆盖口令；远程来源登录访问码必填；本地判定补 remote_addr（修复默认配置浏览器无法首次打开的 403 误拦）
