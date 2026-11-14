@@ -66,6 +66,13 @@ async function apiFetch(path, opts = {}) {
   return res.json();
 }
 
+function activeWorkspaceName() {
+  // 状态展示用工作区名（DESIGN 3.3.3），无匹配时回退 doc_id
+  const list = (typeof workspaces !== 'undefined') ? workspaces : [];
+  const ws = list.find(w => w.id === editor.activeDocId);
+  return (ws && ws.name) || editor.activeDocId;
+}
+
 function cleanGitError(err) {
   if (!err) return '未知错误';
   const e = String(err);
@@ -1350,7 +1357,8 @@ function restoreTabState() {
       editor.activeDocId = first.docId;
       editor.activeFilePath = first.filePath;
       editor.content = first.content || '';
-      editor.unsaved = first.unsaved || false;
+      // 持久化恢复不采纳 unsaved：显示干净状态，真实输入会重新置位（DESIGN 3.7）
+      editor.unsaved = false;
     }
     return true;
   } catch (e) { return false; }
@@ -1381,8 +1389,8 @@ function syncPanel() {
     '<div class="ve-scroll p-3">' +
       (editor.activeDocId ?
         '<div class="border border-secondary-subtle rounded p-2 mb-3 small">' +
-          '<div class="d-flex align-items-center gap-1 mb-1">' +
-            '<i class="bi bi-journal-text"></i><span class="fw-semibold">' + esc(editor.activeDocId) + '</span>' +
+          '<div class="d-flex align-items-center gap-1 mb-1 flex-wrap">' +
+            '<i class="bi bi-journal-text"></i><span class="fw-semibold">' + esc(activeWorkspaceName()) + '</span>' +
             '<span class="text-secondary">· ' + esc(editor.gitBranch || 'main') + '</span>' + badge +
           '</div>' +
           (tr && tr.remote ?
@@ -2306,7 +2314,7 @@ function renderSettingContent(tab) {
       '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-git me-1"></i>Git</div>' +
       '<div class="card-body">' +
         '<p class="text-secondary small mb-3">当前作用文档：' +
-          (editor.activeDocId ? '<span class="badge text-bg-secondary ms-1">' + esc(editor.activeDocId) + '</span>' : '<span class="text-warning ms-1">未选择</span>') +
+          (editor.activeDocId ? '<span class="badge text-bg-secondary ms-1">' + esc(activeWorkspaceName()) + '</span>' : '<span class="text-warning ms-1">未选择</span>') +
         '</p>' +
         '<div class="mb-3">' +
           '<label class="form-label small fw-semibold">自动推送</label>' +
@@ -2570,7 +2578,7 @@ Router.register('#/editor', async () => {
             editor.activeDocId = first.docId;
             editor.activeFilePath = first.filePath;
             editor.content = first.content || '';
-            editor.unsaved = first.unsaved || false;
+            editor.unsaved = false; // 持久化恢复不采纳 unsaved
           }
           return true;
         }
@@ -2586,7 +2594,7 @@ Router.register('#/editor', async () => {
       editor.activeDocId = active.docId;
       editor.activeFilePath = active.filePath;
       editor.content = active.content || '';
-      editor.unsaved = active.unsaved || false;
+      editor.unsaved = false; // 持久化恢复不采纳 unsaved
       renderEditor();
       if (active.scrollPos != null && active.scrollPos > 0) {
         setTimeout(() => {

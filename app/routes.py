@@ -36,9 +36,13 @@ def pick_port(host):
     - 用户显式设置 PORT → 强意图，被占用直接报错退出
     - 未设置 → 默认 58446；被占用时让 OS 分配随机可用高位端口
     选定后写回 os.environ["PORT"]，debug reloader 重启子进程沿用同一端口
+    - Werkzeug reloader 子进程（WERKZEUG_RUN_MAIN=true）不做二次探测：父进程此时
+      已绑定端口，重新探测会把显式 PORT 误判为"被占用"而启动失败
     """
-    explicit = "PORT" in os.environ
     port = int(os.environ.get("PORT", DEFAULT_PORT))
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        return port
+    explicit = "PORT" in os.environ
     if not explicit:
         os.environ["PORT"] = str(port)
     if _port_free(host, port):
