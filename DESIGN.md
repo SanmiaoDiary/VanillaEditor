@@ -1790,7 +1790,7 @@ waitress-serve --host 0.0.0.0 --port 58446 run:app
 | 变量         | 默认值                 | 说明                                                           |
 |--------------|------------------------|----------------------------------------------------------------|
 | `SECRET_KEY` | 随机生成               | Flask 会话密钥                                                 |
-| `JWT_SECRET` | `dev-secret-change-me` | JWT 签名密钥；生产模式检测到默认值时将在启动日志中打印醒目警告 |
+| `JWT_SECRET` | `dev-secret-change-me` | JWT 签名密钥；检测到默认值时启动日志打印醒目警告；`VE_REQUIRE_SECRET=1`（生产部署默认设置）时直接拒绝启动 |
 | `DATA_DIR`   | `./data`               | 数据目录路径                                                   |
 | `PORT`       | `58446`                | 监听端口；未显式设置且被占用时自动回退随机高位端口（见 8.3）   |
 | `HOST`       | `0.0.0.0`              | 监听地址（`0.0.0.0` 表示接受所有网卡）                         |
@@ -1809,7 +1809,7 @@ waitress-serve --host 0.0.0.0 --port 58446 run:app
 4. **Windows 注意** — 系统 `python` 命令可能指向 Windows Store 占位符，请使用虚拟环境内的 Python
 5. **防火墙配置** — 服务器需开放 TCP 58446（HTTP）；如需 Git HTTPS 同步，还需开放对应端口
 
-### 8.6 生产环境反向代理（nginx 示例）
+### 8.7 生产环境反向代理（nginx 示例）
 
 ```nginx
 server {
@@ -1828,7 +1828,7 @@ server {
 
 > 如需 HTTPS，建议配合 Certbot（Let's Encrypt）一键申请证书。
 
-### 8.7 日志滚动配置（logrotate）
+### 8.8 日志滚动配置（logrotate）
 
 ```
 /data/logs/*.log {
@@ -1841,10 +1841,10 @@ server {
 }
 ```
 
-### 8.8 systemd 服务模板
+### 8.9 systemd 服务模板
 
 ```ini
-# /etc/systemd/system/vanilla-editor.service
+# /etc/systemd/system/vanilla-editor.service（系统级，需 root）
 [Unit]
 Description=VanillaEditor
 After=network.target
@@ -1856,6 +1856,7 @@ ExecStart=/opt/vanilla-editor/.venv/bin/gunicorn -w 2 -b 127.0.0.1:58446 run:app
 Restart=on-failure
 Environment="PATH=/opt/vanilla-editor/.venv/bin"
 Environment="DATA_DIR=/opt/vanilla-editor/data"
+Environment="VE_REQUIRE_SECRET=1"
 
 [Install]
 WantedBy=multi-user.target
@@ -1863,7 +1864,15 @@ WantedBy=multi-user.target
 
 启用：`systemctl enable --now vanilla-editor`。
 
-### 8.9 数据备份
+**用户级 systemd（无 root / 最小侵入部署）**：unit 写入 `~/.config/systemd/user/vanilla-editor.service`，`systemctl --user enable --now vanilla-editor` 管理；开机自启需 `sudo loginctl enable-linger <用户>`。无 sudo 时用 `crontab -e` 加 `@reboot` 行兜底。
+
+**最小侵入部署约定**（共享服务器场景）：
+- 不安装任何系统级包（缺依赖时报告并停止，由服务器管理员决定）
+- 不改动防火墙规则、现有服务与端口
+- 全部项目文件只写入部署目录（如 `/mnt/sdcard/pro/VanillaEditor/`）；进程管理文件仅限用户级目录（`~/.config/systemd/user/` 或用户 crontab）
+- SSH 登录凭据仅部署时使用，不写入任何脚本、配置或文档（密码经环境变量传入工具进程）
+
+### 8.10 数据备份
 
 - `data/` 目录（含所有 Git 仓库与用户配置）完整复制即可迁移
 - 定期备份建议：`tar czf backup_$(date +%F).tar.gz data/`
