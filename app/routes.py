@@ -81,7 +81,17 @@ def _force_rmtree(path, retries=3):
 def create_app():
     app = Flask(__name__, static_folder="../static", static_url_path="/")
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32))
-    app.config["JWT_SECRET"] = os.environ.get("JWT_SECRET", "dev-secret-change-me")
+    jwt_secret = os.environ.get("JWT_SECRET", "dev-secret-change-me")
+    if jwt_secret == "dev-secret-change-me":
+        # DESIGN 8.4：默认密钥意味着令牌可被任何人伪造
+        msg = ("[安全警告] JWT_SECRET 使用默认值 dev-secret-change-me，"
+               "令牌可被伪造，请设置强随机密钥（如: python -c \"import secrets; print(secrets.token_hex(32))\"）")
+        if os.environ.get("VE_REQUIRE_SECRET") == "1":
+            raise SystemExit("[启动失败] " + msg + " （VE_REQUIRE_SECRET=1，生产部署强制检查）")
+        print("=" * 70)
+        print(msg)
+        print("=" * 70)
+    app.config["JWT_SECRET"] = jwt_secret
     app.config["DATA_DIR"] = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data"))
     app.config["PORT"] = int(os.environ.get("PORT", 58446))
     app.config["HOST"] = os.environ.get("HOST", "0.0.0.0")
