@@ -73,6 +73,7 @@ function cleanGitError(err) {
   if (/could not read from remote repository|Permission denied \(publickey\)|Could not resolve hostname/.test(e)) return '无法连接远端仓库，请检查地址与网络';
   if (/Already up to date/.test(e)) return '已是最新';
   if (/CONFLICT/.test(e)) return '合并冲突，请手动解决';
+  if (/has no upstream branch|did not specify a branch|no tracking information/.test(e)) return '远端尚未建立跟踪，请在同步面板使用推送/拉取';
   const line = e.split('\n').find(l => l.trim() && !l.startsWith('hint:') && !l.startsWith('error: failed to push'));
   return line ? line.replace(/^fatal:\s*/, '').trim() : '同步失败';
 }

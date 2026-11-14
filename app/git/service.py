@@ -56,7 +56,45 @@ class GitService:
         _, email, _ = self._git(repo_path, "config", "user.email")
         if not email.strip():
             self._git(repo_path, "config", "user.email", f"{username}@vanilla.local")
+        self._ensure_gitignore(repo_path)
         return repo_path
+
+    _GITIGNORE_REQUIRED = (".ve/",)
+
+    def _ensure_gitignore(self, repo_path):
+        """保证 .gitignore 包含 .ve/（设备本地配置不入库，DESIGN 4.3.2）；
+        已有 .gitignore 时仅追加缺失行，不覆盖用户内容"""
+        gi_path = os.path.join(repo_path, ".gitignore")
+        try:
+            existing = ""
+            if os.path.isfile(gi_path):
+                with open(gi_path, encoding="utf-8") as f:
+                    existing = f.read()
+            missing = [line for line in self._GITIGNORE_REQUIRED
+                       if line not in existing.splitlines()]
+            if not missing:
+                return
+            with open(gi_path, "a", encoding="utf-8") as f:
+                if existing and not existing.endswith("\n"):
+                    f.write("\n")
+                f.write("\n# VanillaEditor 设备本地配置（不入库，DESIGN 4.3.2）\n")
+                for line in missing:
+                    f.write(line + "\n")
+        except OSError:
+            pass
+
+    def _untrack_ve_if_tracked(self, repo_path):
+        """历史仓库迁移：.ve/ 已被跟踪则 untrack 并提交一次（DESIGN 4.3.2）"""
+        code, out, _ = self._git(repo_path, "ls-files", "--", ".ve")
+        if code != 0 or not out.strip():
+            return False
+        self._git(repo_path, "rm", "-r", "--cached", "--quiet", ".ve")
+        self._ensure_gitignore(repo_path)
+        self._git(repo_path, "add", ".gitignore")
+        # -c 内联身份：旧仓库可能未配置 user.name/email
+        self._git(repo_path, "-c", "user.name=vanilla", "-c", "user.email=vanilla@local",
+                  "commit", "-m", "chore: untrack .ve device-local config")
+        return True
 
     def repo_exists(self, username, doc_id):
         """原地模式：注册表命中即存在；docs 模式：目录下有 .git 才算"""
@@ -66,10 +104,12 @@ class GitService:
         return os.path.isdir(os.path.join(self._repo_path(username, doc_id), ".git"))
 
     def ensure_repo(self, username, doc_id):
-        """原地模式：源目录已含 .git 则复用，否则在源目录内 git init（DESIGN 4.3.1）"""
+        """原地模式：源目录已含 .git 则复用（并迁移 .ve 入库遗留），否则在源目录内 git init（DESIGN 4.3.1/4.3.2）"""
         repo_path = self._repo_path(username, doc_id)
         if not os.path.isdir(os.path.join(repo_path, ".git")):
             return self.init_repo(username, doc_id)
+        self._ensure_gitignore(repo_path)
+        self._untrack_ve_if_tracked(repo_path)
         return repo_path
 
     # ── file operations ─────────────────────────────────────────
@@ -112,7 +152,7 @@ class GitService:
 
     def _git(self, repo_path, *args):
         result = subprocess.run(
-            ["git"] + list(args),
+            ["git", "-c", "core.quotepath=false"] + list(args),
             cwd=repo_path, capture_output=True, text=True
         )
         return result.returncode, result.stdout, result.stderr
@@ -176,13 +216,25 @@ class GitService:
         return out
 
     def pull(self, username, doc_id):
+        """拉取默认 upstream；无 upstream 时回退到第一个远端（DESIGN 7.2）"""
         repo_path = self.ensure_repo(username, doc_id)
+        branch = self.current_branch(username, doc_id)
         code, out, err = self._git(repo_path, "pull", "--no-rebase")
+        if code != 0 and ("no tracking information" in err
+                          or "did not specify a branch" in err):
+            remote = self._first_remote(repo_path)
+            if remote:
+                return self.pull_from(username, doc_id, remote)
         return code == 0, err.strip() if code != 0 else ""
 
     def push(self, username, doc_id):
+        """推送到默认 upstream；无 upstream 时回退到第一个远端（DESIGN 7.2）"""
         repo_path = self.ensure_repo(username, doc_id)
         code, out, err = self._git(repo_path, "push")
+        if code != 0 and "no upstream branch" in err:
+            remote = self._first_remote(repo_path)
+            if remote:
+                return self.push_to(username, doc_id, remote)
         return code == 0, err.strip() if code != 0 else ""
 
     def fetch_all(self, username, doc_id):
@@ -192,14 +244,24 @@ class GitService:
         return code == 0, err.strip() if code != 0 else ""
 
     def push_to(self, username, doc_id, remote):
+        """按远端推送：显式携带当前分支名，首次推送 -u 建立 upstream（DESIGN 7.2）"""
         repo_path = self.ensure_repo(username, doc_id)
-        code, out, err = self._git(repo_path, "push", remote)
+        branch = self.current_branch(username, doc_id)
+        code, out, err = self._git(repo_path, "push", "-u", remote, branch)
         return code == 0, err.strip() if code != 0 else ""
 
     def pull_from(self, username, doc_id, remote):
+        """按远端拉取：显式携带当前分支名，不依赖 upstream 配置（DESIGN 7.2）"""
         repo_path = self.ensure_repo(username, doc_id)
-        code, out, err = self._git(repo_path, "pull", "--no-rebase", remote)
+        branch = self.current_branch(username, doc_id)
+        code, out, err = self._git(repo_path, "pull", "--no-rebase", remote, branch)
         return code == 0, err.strip() if code != 0 else ""
+
+    def _first_remote(self, repo_path):
+        """返回远端列表中的第一个名字，无远端时返回 None"""
+        code, out, _ = self._git(repo_path, "remote")
+        remotes = [line.strip() for line in out.strip().splitlines() if line.strip()]
+        return remotes[0] if remotes else None
 
     def remote_list(self, username, doc_id):
         """返回 [{name, url, push_url}]"""

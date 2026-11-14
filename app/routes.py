@@ -277,10 +277,11 @@ def create_app():
                 os.makedirs(os.path.dirname(target), exist_ok=True)
                 with open(target, "w", encoding="utf-8") as f:
                     f.write(content)
-        # 同时在 git 仓库中提交（用于版本历史和同步）
+        # 同时在 git 仓库中提交（用于版本历史和同步）；首次提交为 init: 前缀（DESIGN 4.4.2）
         git_service.write_file(username, doc_id, rel_path, content)
         git_service.add_all(username, doc_id)
-        git_service.commit(username, doc_id, f"update: {rel_path.split('/')[-1]}")
+        prefix = "init" if not git_service.get_head_sha(username, doc_id) else "update"
+        git_service.commit(username, doc_id, f"{prefix}: {rel_path.split('/')[-1]}")
         changed = git_service.status(username, doc_id)
         return jsonify({"ok": True, "changed": changed})
 
