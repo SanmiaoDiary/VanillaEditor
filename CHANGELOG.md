@@ -4,6 +4,13 @@ All notable changes to VanillaEditor will be documented in this file.
 
 ---
 
+## [v0.4.2] - 2026-11-15
+
+### Fixed
+- **远程来源下注册流程不可用（v0.4.1 回归）**：注册页不渲染访问码字段，注册成功后的自动登录被"访问码错误或未填写"拒绝。注册页同样显示并提交访问码（DESIGN 4.5.1）
+
+---
+
 ## [v0.4.1] - 2026-11-14
 
 ### Added

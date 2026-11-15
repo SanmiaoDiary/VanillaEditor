@@ -27,6 +27,10 @@
 
 ## 更新日志
 
+### v0.4.2 — 2026-11-15
+
+**fix:** 远程来源注册流程回归修复——注册页渲染访问码字段（v0.4.1 起注册后自动登录被访问码校验拒绝）
+
 ### v0.4.1 — 2026-11-14
 
 **feat:** 生产就绪物料——deploy/ 一键部署（最小侵入：探测式、文件只进部署目录、用户级 systemd/crontab、SSH 凭据不落盘）+ 部署手册；JWT_SECRET 默认值警告与 VE_REQUIRE_SECRET=1 强制检查（DESIGN 8.4）；requirements 含 gunicorn/waitress

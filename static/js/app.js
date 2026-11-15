@@ -1,5 +1,5 @@
 ﻿// ── Version（单点定义，状态栏/关于页/登录页共用）──────────────
-const VE_VERSION = 'v0.4.1';
+const VE_VERSION = 'v0.4.2';
 
 // ── Router ───────────────────────────────────────────────────
 const Router = {
@@ -285,11 +285,11 @@ async function renderLogin() {
               '<label class="form-label small" for="p">密码</label>' +
               '<input type="password" class="form-control" id="p" placeholder="密码" required>' +
             '</div>' +
-            (remoteAccessOn && !isRegister ?
+            (remoteAccessOn ?
             '<div class="mb-3">' +
               '<label class="form-label small" for="ac"><i class="bi bi-key me-1"></i>远程访问码</label>' +
               '<input type="password" class="form-control" id="ac" placeholder="远程访问时必填" autocomplete="off">' +
-              '<div class="form-text small">检测到远程访问已开启（局域网），请输入访问码</div>' +
+              '<div class="form-text small">检测到远程访问已开启（局域网），请输入访问码' + (isRegister ? '（注册后自动登录同样需要）' : '') + '</div>' +
             '</div>' : '') +
             (isRegister ?
             '<div class="mb-3">' +
