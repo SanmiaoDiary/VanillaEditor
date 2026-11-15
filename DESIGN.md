@@ -1872,6 +1872,12 @@ WantedBy=multi-user.target
 - 全部项目文件只写入部署目录（如 `/mnt/sdcard/pro/VanillaEditor/`）；进程管理文件仅限用户级目录（`~/.config/systemd/user/` 或用户 crontab）
 - SSH 登录凭据仅部署时使用，不写入任何脚本、配置或文档（密码经环境变量传入工具进程）
 
+**MCSM 面板托管模式**（统一管理场景，v0.4.1 实测落地）：
+- 将 VE 注册为 MCSM"通用控制台程序"实例：启动命令 `bash <部署目录>/start-mcsm.sh`（环境变量 DATA_DIR/PORT/JWT_SECRET/SECRET_KEY/VE_REQUIRE_SECRET 内联于脚本，权限 600），工作目录 = 部署目录
+- 交接规则：切换到 MCSM 托管时必须停用并删除用户级 systemd unit，避免双实例抢端口
+- **实测限制（MCSM v10.3）**：实例"事件触发型任务"（自动启动/自动重启）的 UI 保存只写 web 侧，daemon 配置（`InstanceConfig/<uuid>.json` 的 `eventTask` 字段）不落盘且实测停止后未自动拉起；要生效需修改该 json 后重启 mcsm-daemon——会终止面板管理的全部实例进程（含 MC），须按约定请示并在 daemon 恢复后从面板手动拉起其他实例
+- 当前生产部署（192.168.3.162）选择跳过 daemon 重启：VE 崩溃或服务器重启后需在面板手动点"开启"
+
 ### 8.10 数据备份
 
 - `data/` 目录（含所有 Git 仓库与用户配置）完整复制即可迁移

@@ -75,3 +75,15 @@ VanillaEditor/
 - 更新：`deploy/deploy.sh --update`（git pull 等价于重新打包上传 + 重启，`data/` 与 `workspaces/` 不受影响）
 - 备份：`tar czf backup_$(date +%F).tar.gz data/ workspaces/`（DESIGN 8.10）
 - 日志：systemd 模式 `journalctl --user -u vanilla-editor`；crontab 模式看部署目录 `gunicorn.log`
+
+## MCSM 面板托管（可选，DESIGN 8.9）
+
+若服务器已跑 MCSManager，可把 VE 注册为"通用控制台程序"实例统一管理（实测 v10.3）：
+
+1. 部署目录内准备 `start-mcsm.sh`（环境变量内联 + `exec .venv/bin/gunicorn ...`，chmod 600）
+2. 面板 → 新建应用 → 直接创建 → 选节点 → 通用控制台程序
+3. 启动命令 `bash <部署目录>/start-mcsm.sh`；服务端文件目录填部署目录本身（原地模式要求）
+4. **切换前必须停用并删除用户级 systemd unit**（避免双实例抢端口）
+5. 运行态开关：实例详情页顶部"开启/关闭/重启"，控制台实时查看 gunicorn 输出
+
+**已知限制**：实例"事件触发型任务"（自动启动/自动重启）在 v10.3 的 UI 保存不写 daemon 配置、实测不生效——要生效需改 `daemon/data/InstanceConfig/<uuid>.json` 的 `eventTask` 字段并重启 mcsm-daemon（会终止面板所有实例进程，含 MC，请按你的约定先请示相关方）。不重启则实例停止/服务器重启后需在面板手动点"开启"。
