@@ -49,6 +49,9 @@
 - [x] **13. 资源管理器 docs 模式残留区域与隐藏文件开关失效**（DESIGN 3.3.1）✅ v0.4.3
   修复：删除"暂无文档，点击右上角新建"残留区块（docs 模式废弃后 /api/docs 永远为空，DESIGN 3.3.1 mockup 同步移除 DOCUMENTS 分组）；"显示隐藏文件"开关此前只写 localStorage 未在渲染时过滤，现文件树按 `ve_show_hidden` 过滤 `.` 开头路径段并实时生效
 
+- [x] **14. 移动端三问题：工具条图标/点击无效、扩展开关锁死页面、textarea 未填满**（DESIGN 3.6）✅ v0.4.4
+  修复：① 工具条文件资源管理器按钮图标 `bi-list`→`bi-files`（DESIGN 3.6 同步修正），`setPanel` 改 Bootstrap 原生 Offcanvas API（原 wasActive 逻辑使点击永远走"收起"分支 + 手造 backdrop 与实例冲突）；② `toggleExt` 在抽屉打开时不再整体重绘（重绘销毁 offcanvas DOM 导致 backdrop 残留锁死页面），挂 `hidden.bs.offcanvas` 后应用，抽屉保持打开可连续操作；`renderEditor` 开头防御清理残留遮罩；③ `#app` 补 `100dvh`（移动端地址栏 100vh 问题）、`.ve-split .pane` 补 `min-height: 0`
+
 ## 二、设计已定、待实现（新增功能）
 
 **工作区流程对齐：**

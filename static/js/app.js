@@ -1,5 +1,5 @@
 ﻿// ── Version（单点定义，状态栏/关于页/登录页共用）──────────────
-const VE_VERSION = 'v0.4.3';
+const VE_VERSION = 'v0.4.4';
 
 // ── Router ───────────────────────────────────────────────────
 const Router = {
@@ -784,25 +784,17 @@ async function removeRemote(name) {
 
 // ── Menu actions ─────────────────────────────────────────────
 function setPanel(panel) {
-  // 再次点击当前激活面板 → 收起侧边栏（移动端）
+  // 再次点击当前激活面板 → 收起抽屉；否则切换面板并打开（移动端用 Bootstrap 原生 Offcanvas API，
+  // 避免手造 backdrop 与 Offcanvas 实例状态冲突导致的遮罩残留）
   const wasActive = activePanel === panel;
   activePanel = panel;
   renderEditor();
   if (window.innerWidth < 992) {
     const el = document.getElementById('veSidebar');
-    if (!el) return;
-    if (wasActive) {
-      el.classList.remove('show');
-      document.querySelector('.offcanvas-backdrop')?.remove();
-      document.body.classList.remove('modal-open');
-    } else if (!el.classList.contains('show')) {
-      el.classList.add('show');
-      const bp = document.createElement('div');
-      bp.className = 'offcanvas-backdrop fade';
-      document.body.appendChild(bp);
-      requestAnimationFrame(() => bp.classList.add('show'));
-      document.body.classList.add('modal-open');
-    }
+    if (!el || !window.bootstrap || !window.bootstrap.Offcanvas) return;
+    const oc = window.bootstrap.Offcanvas.getOrCreateInstance(el);
+    if (wasActive) oc.hide();
+    else oc.show();
   }
 }
 
@@ -1454,8 +1446,15 @@ function extensionsPanel() {
 function toggleExt(id, on) {
   localStorage.setItem('ve_ext_' + id, on ? '1' : '0');
   toast('已' + (on ? '启用' : '禁用') + '扩展', 'ok');
-  // 已在编辑器页且扩展影响 UI 时立即重渲；否则等用户切换到对应面板再渲染
-  if (location.hash === '#/editor') renderEditor();
+  if (location.hash !== '#/editor') return;
+  // 移动端抽屉打开时整体重绘会销毁 offcanvas DOM 导致 backdrop 残留锁死页面：
+  // 此时仅保存设置并保持抽屉打开（可继续开关扩展），抽屉收起后再应用
+  const sidebar = document.getElementById('veSidebar');
+  if (sidebar && sidebar.classList.contains('show')) {
+    sidebar.addEventListener('hidden.bs.offcanvas', () => renderEditor(), { once: true });
+    return;
+  }
+  renderEditor();
 }
 
 function toggleAutoSync(on) {
@@ -1628,6 +1627,13 @@ function applyTheme() {
 
 // ── Editor page ──────────────────────────────────────────────
 function renderEditor() {
+  // 防御：清理残留的 offcanvas backdrop（重绘时 offcanvas DOM 被替换，Bootstrap 遮罩可能残留锁死页面）
+  const liveDrawer = document.querySelector('.offcanvas.show');
+  if (!liveDrawer) {
+    document.querySelectorAll('.offcanvas-backdrop').forEach(b => b.remove());
+    document.body.classList.remove('modal-open');
+    document.body.style.overflow = '';
+  }
   const app = document.getElementById('app');
   const fileName = editor.activeFilePath ? editor.activeFilePath.split('/').pop() : '';
 
@@ -1895,7 +1901,7 @@ function renderEditor() {
       '<div class="ve-resizer ve-resizer-v d-none d-lg-block" id="veSidebarResizer" title="拖动调整侧边栏宽度"></div>' +
       '<main class="flex-grow-1 d-flex flex-column overflow-hidden">' +
         '<div class="d-flex align-items-center gap-2 px-3 py-1 bg-body-tertiary border-bottom border-secondary-subtle flex-shrink-0">' +
-          '<button class="btn btn-sm btn-outline-secondary py-0 d-lg-none" onclick="setPanel(\'files\')" title="文件列表"><i class="bi bi-list"></i></button>' +
+          '<button class="btn btn-sm btn-outline-secondary py-0 d-lg-none" onclick="setPanel(\'files\')" title="文件资源管理器"><i class="bi bi-files"></i></button>' +
           '<button class="btn btn-sm btn-outline-secondary py-0 d-lg-none" onclick="setPanel(\'git\')" title="Git 面板"><i class="bi bi-git"></i></button>' +
           '<button class="btn btn-sm btn-outline-secondary py-0 d-lg-none" onclick="setPanel(\'sync\')" title="同步"><i class="bi bi-arrow-repeat"></i></button>' +
           '<button class="btn btn-sm btn-outline-secondary py-0 d-lg-none" onclick="setPanel(\'extensions\')" title="扩展"><i class="bi bi-puzzle"></i></button>' +

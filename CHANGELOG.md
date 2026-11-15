@@ -4,6 +4,15 @@ All notable changes to VanillaEditor will be documented in this file.
 
 ---
 
+## [v0.4.4] - 2026-11-15
+
+### Fixed
+- **移动端扩展开关锁死页面（严重）**：开关扩展触发整体重绘，移动端 offcanvas 抽屉 DOM 被销毁后 Bootstrap 遮罩残留在 body 上导致整页蒙灰无法点击。现抽屉打开时仅保存设置并保持抽屉打开（可连续开关扩展），抽屉收起后再应用；`renderEditor` 增加残留遮罩防御清理
+- **移动端工具条资源管理器按钮**：图标 `bi-list`→`bi-files`（DESIGN 3.6 同步修正）；`setPanel` 改用 Bootstrap 原生 Offcanvas API（此前 activePanel 初始为 files 导致点击永远走"收起"分支，看起来毫无反应）
+- **移动端 textarea 未填满**：`#app` 补 `100dvh`（移动端地址栏使 100vh 大于实际可视高度）；`.ve-split .pane` 补 `min-height: 0`
+
+---
+
 ## [v0.4.3] - 2026-11-15
 
 ### Fixed

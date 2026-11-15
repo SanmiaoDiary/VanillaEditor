@@ -1,6 +1,6 @@
 # VanillaEditor 设计文档
 
-> 版本：v0.4.3 ｜ 最后更新：2026-11-15
+> 版本：v0.4.4 ｜ 最后更新：2026-11-15
 
 ---
 
@@ -731,7 +731,7 @@ develop（显示分支）（分支切换按钮） | （字数显示）2064 字 �
 
 1. **顶栏**：Logo（VanillaEditor）+ 汉堡按钮（`bi-list`）
 2. **菜单 offcanvas**：左侧滑出 280px，扁平化全部菜单项（打开文档/导入/保存/另存为/Git 全部操作/同步操作/设置/用户信息与设置/退出登录），每项大触控区（py-3 px-4）
-3. **编辑区工具条**（顶栏下方）：文件列表按钮（`bi-list`）、Git 面板按钮（`bi-git`）、同步面板按钮（`bi-arrow-repeat`）、扩展面板按钮（`bi-puzzle`）——点击弹出对应侧边栏 offcanvas；右侧编辑/预览切换按钮（`bi-pencil`/`bi-eye`，带文案）
+3. **编辑区工具条**（顶栏下方）：文件资源管理器按钮（`bi-files`，与 activity bar 图标一致）、Git 面板按钮（`bi-git`）、同步面板按钮（`bi-arrow-repeat`）、扩展面板按钮（`bi-puzzle`）——点击弹出对应侧边栏 offcanvas（Bootstrap 原生 Offcanvas API 管理，避免遮罩残留）；右侧编辑/预览切换按钮（`bi-pencil`/`bi-eye`，带文案）
 4. **登录页**：卡片自适应宽度（max-width 400px），表单不变
 5. **设置页**：汉堡按钮打开设置分组 offcanvas（右侧滑出）；桌面侧栏可收起并持久化
 6. **底部状态栏**：精简为分支名 + 版本号 + 时钟
