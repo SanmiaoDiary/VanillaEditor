@@ -4,6 +4,14 @@ All notable changes to VanillaEditor will be documented in this file.
 
 ---
 
+## [v0.4.3] - 2026-11-15
+
+### Fixed
+- **资源管理器移除 docs 模式残留区域**：工作区下方"暂无文档，点击右上角新建"区块（/api/docs 已废弃、永远为空）整块移除，DESIGN 3.3.1 mockup 同步删去 DOCUMENTS 分组
+- **"显示隐藏文件"开关生效**：此前开关只写 localStorage、渲染时从未过滤；现文件树按开关过滤 `.` 开头路径段（如 `.ve/ve_workspace.json`、`.gitignore`），文件数徽章同步，切回编辑器自动应用（DESIGN 5.4）
+
+---
+
 ## [v0.4.2] - 2026-11-15
 
 ### Fixed

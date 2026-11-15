@@ -1,5 +1,5 @@
 ﻿// ── Version（单点定义，状态栏/关于页/登录页共用）──────────────
-const VE_VERSION = 'v0.4.2';
+const VE_VERSION = 'v0.4.3';
 
 // ── Router ───────────────────────────────────────────────────
 const Router = {
@@ -1648,7 +1648,9 @@ function renderEditor() {
           workspaces.filter((ws, i, arr) => {
             return arr.findIndex(x => x.id === ws.id || (x.source_path && x.source_path === ws.source_path)) === i;
           }).map(ws => {
-            const wsFiles = wsFileCache[ws.id] || [];
+            const showHidden = localStorage.getItem('ve_show_hidden') === '1';
+            // 隐藏文件开关（DESIGN 545）：路径任一段以 . 开头且开关关闭时不显示
+            const wsFiles = (wsFileCache[ws.id] || []).filter(f => showHidden || !f.path.split('/').some(seg => seg.startsWith('.')));
             const isActive = editor.activeDocId === ws.id;
             const expanded = !!expandedWorkspaces[ws.id];
             return '<div>' +
@@ -1666,22 +1668,6 @@ function renderEditor() {
             '</div>';
           }).join('') :
           '<div class="px-3 py-2 text-secondary small">点击右上角 <i class="bi bi-folder-open"></i> 按钮打开工作区</div>') +
-        (workspaces.length > 0 ? '<hr class="my-1">' : '') +
-       (sidebarDocs.filter(d => !workspaces.some(w => w.id === d.id)).length === 0 ?
-          '<div class="px-3 py-2 text-secondary small">暂无文档，点击右上角新建</div>' :
-          sidebarDocs.filter(d => !workspaces.some(w => w.id === d.id)).map(doc =>
-            '<div>' +
-              '<div class="ve-tree-item" onclick="toggleDoc(\'' + esc(doc.id) + '\')">' +
-                '<i class="bi ' + (expandedDocs[doc.id] ? 'bi-folder2-open' : 'bi-folder') + '"></i>' +
-                '<span class="nm">' + esc(doc.name) + '</span>' +
-                '<span class="text-secondary small">' + (doc.file_count || 0) + '</span>' +
-              '</div>' +
-              (expandedDocs[doc.id] && doc.children ? doc.children.map(f =>
-               '<div class="ve-tree-item ps-4' + (editor.activeDocId === doc.id && editor.activeFilePath === f.path ? ' on' : '') + '" onclick="openFile(\'' + esc(doc.id) + '\',\'' + esc(f.path) + '\')">' +
-                 '<i class="bi ' + (f.path.endsWith('.md') ? 'bi-file-earmark-text' : 'bi-file-earmark') + '"></i>' +
-                 '<span class="nm">' + esc(f.path.split('/').pop()) + '</span>' +
-               '</div>').join('') : '') +
-          '</div>').join('')) +
     '</div>';
 
   const tr = syncStatus && syncStatus.tracking;

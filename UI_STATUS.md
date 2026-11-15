@@ -43,10 +43,11 @@
 - [x] **11. 登录页缺访问码输入框**（DESIGN 4.5.2、3.4）✅ v0.3.1
   已实现：`GET /api/public/config` 探测远程访问状态，开启时登录页显示访问码字段；登录接口校验访问码
 
-- [ ] **12. 新建/删除使用原生弹窗**（DESIGN 3.7 规范 1、2）
-  现状：新建文件/文件夹、另存为用 `prompt()`；删除文档/关闭工作区/回退确认用 `confirm()`
-  目标：统一使用模态框，危险操作红色警示
-  位置：`static/js/app.js` createFile/createFolder/menuSaveAs/deleteDoc/closeWorkspace/resetTo
+- [x] **12. 新建/删除使用原生弹窗**（DESIGN 3.7 规范 1、2）✅ v0.3.6
+  已实现：showConfirm()/showInput() 封装，全部替换
+
+- [x] **13. 资源管理器 docs 模式残留区域与隐藏文件开关失效**（DESIGN 3.3.1）✅ v0.4.3
+  修复：删除"暂无文档，点击右上角新建"残留区块（docs 模式废弃后 /api/docs 永远为空，DESIGN 3.3.1 mockup 同步移除 DOCUMENTS 分组）；"显示隐藏文件"开关此前只写 localStorage 未在渲染时过滤，现文件树按 `ve_show_hidden` 过滤 `.` 开头路径段并实时生效
 
 ## 二、设计已定、待实现（新增功能）
 
