@@ -7,6 +7,17 @@ set -euo pipefail
 DIR="$1"; PORT="$2"; JWT="$3"; SK="$4"; IDX="${5:-}"; UPDATE="${6:-}"
 VENV="$DIR/.venv"
 
+# ── 预配置远程访问（仅首次部署且未配置时）──────────────────────
+# 服务器场景必需：远程访问默认关闭时仅本机可达，其他设备连注册页都打不开。
+# 账号不预建（部署后由用户浏览器注册，DESIGN 4.5.1）。
+ACCESS_CODE=""
+if [ "$UPDATE" != "--update" ] && [ ! -f "$DIR/data/remote_access.json" ]; then
+  ACCESS_CODE=$(python3 -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(6)))")
+  mkdir -p "$DIR/data"
+  printf '{"enabled": true, "allowed_ips": [], "access_code": "%s", "auth_code": "", "auth2_enabled": false}' "$ACCESS_CODE" \
+    > "$DIR/data/remote_access.json"
+fi
+
 [ -d "$VENV" ] || python3 -m venv "$VENV"
 echo "installing deps..."
 "$VENV/bin/pip" install -q ${IDX:+-i "$IDX"} -r "$DIR/requirements.txt"
@@ -59,3 +70,7 @@ CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" "http://127.0.0.1:$PORT/api/p
 echo "manager=$MGR selfcheck=$CODE dir=$DIR port=$PORT"
 [ "$CODE" = "200" ] || { echo "自检失败，查看日志: $DIR/gunicorn.log 或 journalctl --user -u vanilla-editor"; exit 1; }
 echo "OK: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo '<server-ip>'):$PORT"
+[ -n "$ACCESS_CODE" ] && echo "访问码（远程登录用）: $ACCESS_CODE"
+echo "—— 部署后建议手动执行（脚本不代做，最小侵入）——"
+echo "  常驻自启: sudo loginctl enable-linger $(id -un)   # 否则 SSH 会话断开后服务停止"
+echo "  防火墙放行（ufw）: sudo ufw allow from <局域网网段> to any port $PORT proto tcp"

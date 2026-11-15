@@ -29,7 +29,15 @@ deploy/deploy.sh            # 完整部署
 deploy/deploy.sh --update   # 更新代码并重启（保留 data/ 与工作区）
 ```
 
-部署脚本自动完成：创建目录 → `git archive` 打包上传 → venv + pip → 生成随机 `JWT_SECRET`/`SECRET_KEY`（应用密钥，写入用户级 unit，权限 600）→ 用户级 systemd 启动（失败自动退 crontab `@reboot` + nohup）→ 本机自检 `GET /api/public/config`。
+部署脚本自动完成：创建目录 → `git archive` 打包上传 → venv + pip → 生成随机 `JWT_SECRET`/`SECRET_KEY`（应用密钥，写入用户级 unit，权限 600）→ 用户级 systemd 启动（失败自动退 crontab `@reboot` + nohup）→ **预配置远程访问**（生成 6 位访问码并打印；账号不预建，由你浏览器注册）→ 本机自检 `GET /api/public/config`。
+
+**部署后两个关键手动步骤**（脚本会打印提示）：
+
+1. **常驻自启**：用户级 systemd 在 SSH 会话断开后会停止服务（无 linger 时）。执行
+   `sudo loginctl enable-linger <部署用户>` —— 否则每次重启/断连后需要重新 SSH 登录拉起服务
+2. **防火墙放行**：若服务器启用 ufw/nftables，默认拦截新端口。执行
+   `sudo ufw allow from <局域网网段> to any port 58446 proto tcp comment 'VanillaEditor'`
+   （建议限定局域网来源，与既有规则风格一致）
 
 ## 目录结构（部署目录）
 
