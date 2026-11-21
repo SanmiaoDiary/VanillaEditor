@@ -117,4 +117,4 @@ VanillaEditor/
 
 ## 许可
 
-[MIT](./LICENSE)
+[三苗工作室开源许可证 v1.0](./LICENSE.md) (SanmiaoStudio / SanmiaoDiary © 2026)

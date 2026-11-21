@@ -989,6 +989,18 @@ async function saveNow() {
     const ub = document.getElementById('veUnsavedBar');
     if (ub) ub.classList.add('d-none');
     toast('已保存', 'ok');
+    // Report stats: calculate words added this session
+    try {
+      const prevLen = parseInt(sessionStorage.getItem('ve_last_save_len') || '0', 10);
+      const curLen = editor.content.length;
+      const wordsAdded = Math.max(0, curLen - prevLen);
+      sessionStorage.setItem('ve_last_save_len', String(curLen));
+      const today = new Date().toISOString().slice(0, 10);
+      await apiFetch('/stats/report', {
+        method: 'POST',
+        body: JSON.stringify({ date: today, words_added: wordsAdded })
+      });
+    } catch (e) { /* non-fatal: don't block save */ }
   }
 }
 
@@ -1424,6 +1436,7 @@ function extensionsPanel() {
     { id: 'imagepaste', name: '图片粘贴', desc: '粘贴图片自动存入 assets/', def: false },
     { id: 'autosave', name: '自动保存', desc: '停止输入 1.5 秒后自动保存', def: true },
     { id: 'spellcheck', name: '拼写检查', desc: '中英文基础拼写提示（规划）', def: false },
+    { id: 'motivation', name: '创作激励', desc: 'ESP-32摆件联动 + 写作热力图', def: false },
   ];
   return '<div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom border-secondary-subtle">' +
       '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">扩展</span>' +
@@ -1446,6 +1459,10 @@ function extensionsPanel() {
 function toggleExt(id, on) {
   localStorage.setItem('ve_ext_' + id, on ? '1' : '0');
   toast('已' + (on ? '启用' : '禁用') + '扩展', 'ok');
+  // Motivation extension auto-enables stats reporting if not already active
+  if (id === 'motivation' && on) {
+    sessionStorage.setItem('ve_motivation_enabled', '1');
+  }
   if (location.hash !== '#/editor') return;
   // 移动端抽屉打开时整体重绘会销毁 offcanvas DOM 导致 backdrop 残留锁死页面：
   // 此时仅保存设置并保持抽屉打开（可继续开关扩展），抽屉收起后再应用
@@ -2204,6 +2221,9 @@ function switchSettingTab(tab) {
     loadRemoteListIntoSetting();
     loadAccessControl();
   }
+  if (tab === 'workspace') {
+    loadWorkspaceStats();
+  }
 }
 
 function toggleSettingSidebar() {
@@ -2215,23 +2235,71 @@ function toggleSettingSidebar() {
   if (btn) btn.innerHTML = '<i class="bi bi-' + (settingSidebarCollapsed ? 'chevron-right' : 'chevron-left') + '"></i>';
 }
 
+async function loadWorkspaceStats() {
+  try {
+    const summary = await apiFetch('/stats/summary');
+    if (summary) {
+      const totalEl = document.getElementById('ve-stats-total');
+      const todayEl = document.getElementById('ve-stats-today');
+      if (totalEl) totalEl.textContent = (summary.total_words || 0).toLocaleString();
+      if (todayEl) todayEl.textContent = (summary.today_words || 0).toLocaleString();
+    }
+    const days = await apiFetch('/stats?days=365');
+    if (days && days.stats) {
+      renderHeatmap(days.stats);
+    }
+  } catch (e) { /* non-fatal */ }
+}
+
+function renderHeatmap(stats) {
+  const container = document.getElementById('ve-heatmap');
+  if (!container || !stats.length) return;
+  const sorted = [...stats].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const map = {};
+  for (const s of sorted) { map[s.date] = s.words_added || 0; }
+  const today = new Date();
+  const dayOfWeek = today.getDay() || 7;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - dayOfWeek + 1);
+  let html = '<div class="d-flex flex-wrap" style="gap:2px">';
+  for (let week = 0; week < 52; week++) {
+    html += '<div class="d-flex flex-column gap-1" style="gap:2px">';
+    for (let day = 0; day < 7; day++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + week * 7 + day);
+      const ds = d.toISOString().slice(0, 10);
+      const wc = map[ds] || 0;
+      let color = 'var(--bs-secondary-bg)';
+      if (wc > 0) {
+        if (wc < 500) color = '#9be9a8';
+        else if (wc < 1500) color = '#40c463';
+        else if (wc < 3000) color = '#30a14e';
+        else if (wc < 6000) color = '#216e39';
+        else color = '#1a4d2e';
+      }
+      const title = ds + ': ' + wc.toLocaleString() + ' characters';
+      html += '<div title="' + title + '" style="width:11px;height:11px;background:' + color + ';border-radius:2px;display:block;"></div>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
 function renderSettingContent(tab) {
   if (tab === 'workspace') {
-    // 写作统计（本地口径：当前会话字数；服务端 Stats API 为规划功能，见 DESIGN.md 4.9）
-    const stats = JSON.parse(localStorage.getItem('ve_stats') || '{}');
-    const today = new Date().toISOString().slice(0, 10);
-    const total = stats.total_words || 0;
-    const todayWords = (stats.daily && stats.daily[today]) || 0;
+    // 写作统计（从服务端加载）
     return '<div class="card h-100" style="max-width:720px">' +
       '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-speedometer2 me-1"></i>工作台</div>' +
       '<div class="card-body">' +
         '<div class="row g-3 mb-4">' +
-          '<div class="col-6 col-md-4"><div class="border border-secondary-subtle rounded p-3 text-center"><div class="text-secondary small">累计写字数</div><div class="fs-4 fw-semibold">' + total.toLocaleString() + '</div></div></div>' +
-          '<div class="col-6 col-md-4"><div class="border border-secondary-subtle rounded p-3 text-center"><div class="text-secondary small">今日写字数</div><div class="fs-4 fw-semibold">' + todayWords.toLocaleString() + '</div></div></div>' +
+          '<div class="col-6 col-md-4"><div class="border border-secondary-subtle rounded p-3 text-center"><div class="text-secondary small">累计写字数</div><div class="fs-4 fw-semibold" id="ve-stats-total">-</div></div></div>' +
+          '<div class="col-6 col-md-4"><div class="border border-secondary-subtle rounded p-3 text-center"><div class="text-secondary small">今日写字数</div><div class="fs-4 fw-semibold" id="ve-stats-today">-</div></div></div>' +
           '<div class="col-6 col-md-4"><div class="border border-secondary-subtle rounded p-3 text-center"><div class="text-secondary small">打开文件数</div><div class="fs-4 fw-semibold">' + openTabs.length + '</div></div></div>' +
         '</div>' +
         '<div class="text-uppercase text-secondary mb-2" style="font-size:11px;letter-spacing:1px">写作格子（近一年）</div>' +
-        '<div class="border border-secondary-subtle rounded p-3 text-secondary small">GitHub 风格写作热力图依赖服务端 Stats API（规划中，见 DESIGN.md 4.9），当前先以统计卡展示。</div>' +
+        '<div id="ve-heatmap" class="p-2"></div>' +
+        '<div class="mt-2 text-secondary small" style="font-size:10px">深绿=多，浅绿=少，灰=无写作</div>' +
       '</div>' +
     '</div>';
   }
@@ -2298,6 +2366,13 @@ function renderSettingContent(tab) {
       '<div class="card-header bg-transparent border-secondary-subtle border-top"><i class="bi bi-hdd-network me-1"></i>同步设备管理</div>' +
       '<div class="card-body" id="veRemoteListBody" style="min-height:60px">' +
         '<div class="text-secondary small">设备配对协议（一次性配对码 + 90 天设备令牌）为规划功能（DESIGN.md 第 7 章）。当前版本通过 Git 远端管理同步设备，入口见「Git」设置页。</div>' +
+      '</div>' +
+      '<div class="card-header bg-transparent border-secondary-subtle border-top"><i class="bi bi-cloud-arrow-up me-1"></i>SMB/NAS 备份</div>' +
+      '<div class="card-body" id="veBackupBody" style="min-height:60px">' +
+        '<div class="small text-secondary mb-3">将完整数据目录打包并上传至 NAS/SMB 共享文件夹进行离线备份。</div>' +
+        '<div id="veBackupConfig" class="mb-3"></div>' +
+        '<button class="btn btn-outline-primary btn-sm" onclick="showSmbConfig()"><i class="bi bi-gear me-1"></i>配置备份</button> ' +
+        '<button class="btn btn-outline-success btn-sm ms-2" onclick="runBackup()"><i class="bi bi-cloud-upload me-1"></i>立即备份</button>' +
       '</div>' +
     '</div>';
   }
@@ -2469,6 +2544,71 @@ async function toggleAuth2(on) {
   const r = await apiFetch('/access/auth2-toggle', { method: 'POST', body: JSON.stringify({ enabled: on }) });
   if (r && r.ok) toast('二次认证已' + (on ? '开启' : '关闭'), on ? 'ok' : 'info');
   else toast('操作失败', 'err');
+}
+
+// ── SMB/NAS Backup Functions ─────────────────────────────────────
+
+let smbConfig = null;
+
+async function loadSmbConfig() {
+  try {
+    smbConfig = await apiFetch('/backup/smb');
+    renderSmbConfig();
+  } catch (e) { /* non-fatal */ }
+}
+
+function renderSmbConfig() {
+  const container = document.getElementById('veBackupConfig');
+  if (!container || !smbConfig) return;
+  if (!smbConfig.configured) {
+    container.innerHTML = '<div class="text-secondary small">未配置 SMB 备份。点击「配置备份」填写 NAS 信息。</div>';
+    return;
+  }
+  container.innerHTML = '<div class="small text-success mb-2"><i class="bi bi-check-circle me-1"></i>SMB 已配置：//' + esc(smbConfig.host) + '/' + esc(smbConfig.share) + ' (用户: ' + esc(smbConfig.username) + ')</div>';
+}
+
+async function showSmbConfig() {
+  await loadSmbConfig();
+  const host = smbConfig?.host || '';
+  const share = smbConfig?.share || '';
+  const username = smbConfig?.username || '';
+  showInput('配置 SMB 备份', '', '', async () => {
+    const input = document.getElementById('smb-config-input');
+    if (!input) return;
+    try {
+      const cfg = JSON.parse(input.value);
+      await apiFetch('/backup/smb', { method: 'POST', body: JSON.stringify(cfg) });
+      smbConfig = await apiFetch('/backup/smb');
+      renderSmbConfig();
+      toast('SMB 配置已保存', 'ok');
+    } catch (e) {
+      toast('配置格式错误', 'err');
+    }
+  }, '<label class="form-label small fw-semibold">主机地址</label><input id="smb-host" class="form-control form-control-sm mb-2" value="' + esc(host) + '" placeholder="例如：192.168.1.100"><label class="form-label small fw-semibold">共享文件夹名</label><input id="smb-share" class="form-control form-control-sm mb-2" value="' + esc(share) + '" placeholder="例如：backups"><label class="form-label small fw-semibold">用户名</label><input id="smb-user" class="form-control form-control-sm mb-2" value="' + esc(username) + '" placeholder="SMB 用户名"><label class="form-label small fw-semibold">密码</label><input id="smb-pass" type="password" class="form-control form-control-sm mb-3" placeholder="SMB 密码">');
+  // Pre-populate fields
+  setTimeout(() => {
+    const hostEl = document.getElementById('smb-host');
+    const shareEl = document.getElementById('smb-share');
+    const userEl = document.getElementById('smb-user');
+    const passEl = document.getElementById('smb-pass');
+    if (hostEl) hostEl.value = host;
+    if (shareEl) shareEl.value = share;
+    if (userEl) userEl.value = username;
+  }, 100);
+}
+
+async function runBackup() {
+  if (!smbConfig?.configured) {
+    toast('请先配置 SMB 备份', 'err');
+    return;
+  }
+  try {
+    await apiFetch('/backup/run', { method: 'POST' });
+    toast('备份任务已启动', 'ok');
+    loadSmbConfig();
+  } catch (e) {
+    toast(e.message || '备份失败', 'err');
+  }
 }
 
 function menuAuthCode() {

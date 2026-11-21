@@ -181,6 +181,21 @@ def create_app():
             return jsonify({"error": "用户名或密码错误"}), 401
         expire = datetime.now(timezone.utc) + timedelta(days=30)
         token = jwt.encode({"sub": username, "exp": expire, "ver": user.get("token_version", 1)}, app.config["JWT_SECRET"], algorithm="HS256")
+        # Report login stat for this user
+        try:
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            entries = _load_stats(username)
+            found_login = False
+            for e in entries:
+                if e.get("date") == today_str:
+                    e["login_count"] = e.get("login_count", 0) + 1
+                    found_login = True
+                    break
+            if not found_login:
+                entries.append({"date": today_str, "words_added": 0, "push_count": 0, "sync_count": 0, "login_count": 1})
+            _save_stats(username, entries)
+        except Exception:
+            pass  # non-fatal
         return jsonify({"token": token, "username": username})
 
     @app.route("/api/auth/me", methods=["GET"])
@@ -343,6 +358,7 @@ def create_app():
         if not doc_id:
             return jsonify({"error": "doc_id required"}), 400
         ok, err = git_service.pull(username, doc_id)
+        if ok: _report_sync_stat(username, "sync_count", 1)
         return jsonify({"ok": ok, "error": err})
 
     @app.route("/api/sync/push", methods=["POST"])
@@ -354,6 +370,7 @@ def create_app():
         if not doc_id:
             return jsonify({"error": "doc_id required"}), 400
         ok, err = git_service.push(username, doc_id)
+        if ok: _report_sync_stat(username, "push_count", 1)
         return jsonify({"ok": ok, "error": err})
 
     @app.route("/api/sync/status", methods=["GET"])
@@ -456,6 +473,144 @@ def create_app():
         repo_path = git_service._repo_path(username, doc_id)
         code, out, err = git_service._git(repo_path, "remote", "remove", name)
         return jsonify({"ok": code == 0})
+
+    # ── /api/stats ──────────────────────────────────────────────
+    # Stats persistence: JSON files under data/stats/<username>.json
+    # Schema per entry: {date, words_added, push_count, sync_count, login_count}
+
+    def _stats_path(username):
+        import json as _json
+        p = os.path.join(app.config["DATA_DIR"], "stats")
+        os.makedirs(p, exist_ok=True)
+        return os.path.join(p, f"{username}.json")
+
+    def _load_stats(username):
+        p = _stats_path(username)
+        if not os.path.exists(p):
+            return []
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return _json.load(f)
+        except (_json.JSONDecodeError, OSError):
+            return []
+
+    def _save_stats(username, entries):
+        p = _stats_path(username)
+        with open(p, "w", encoding="utf-8") as f:
+            _json.dump(entries, f, ensure_ascii=False, indent=2)
+
+    def _report_sync_stat(username, field, delta):
+        """Increment a stats counter for today."""
+        try:
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            entries = _load_stats(username)
+            found = False
+            for e in entries:
+                if e.get("date") == today_str:
+                    e[field] = e.get(field, 0) + delta
+                    found = True
+                    break
+            if not found:
+                entries.append({"date": today_str, "words_added": 0, "push_count": 0, "sync_count": 0, "login_count": 0})
+                entries[-1][field] = delta
+            _save_stats(username, entries)
+        except Exception:
+            pass  # non-fatal
+
+    @app.route("/api/stats/report", methods=["POST"])
+    def stats_report():
+        """Log a daily stats entry. Accepts auth token or no-auth (for ESP-32)."""
+        data = request.get_json() or {}
+        username = g.username if hasattr(g, 'username') and g.username else None
+        date_str = data.get("date")
+        if not date_str:
+            return jsonify({"error": "date required"}), 400
+        # Validate date format YYYY-MM-DD
+        try:
+            datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            return jsonify({"error": "invalid date format, use YYYY-MM-DD"}), 400
+        if username is None:
+            # No-auth call (e.g. from ESP-32): store under a default user or reject
+            username = data.get("username", "guest")
+        entries = _load_stats(username)
+        # Find or create entry for this date
+        found = False
+        for e in entries:
+            if e.get("date") == date_str:
+                e["words_added"] = e.get("words_added", 0) + data.get("words_added", 0)
+                e["push_count"] = e.get("push_count", 0) + data.get("push_count", 0)
+                e["sync_count"] = e.get("sync_count", 0) + data.get("sync_count", 0)
+                e["login_count"] = e.get("login_count", 0) + data.get("login_count", 0)
+                found = True
+                break
+        if not found:
+            entries.append({
+                "date": date_str,
+                "words_added": data.get("words_added", 0),
+                "push_count": data.get("push_count", 0),
+                "sync_count": data.get("sync_count", 0),
+                "login_count": data.get("login_count", 0),
+            })
+        _save_stats(username, entries)
+        return jsonify({"ok": True})
+
+    @app.route("/api/stats", methods=["GET"])
+    @require_auth
+    def stats_list():
+        """Return daily stats for the current user over the last N days."""
+        username = g.username
+        days = int(request.args.get("days", 365))
+        entries = _load_stats(username)
+        if not entries:
+            return jsonify({"stats": []})
+        from datetime import date as _date
+        today = _date.today()
+        cutoff = (today - timedelta(days=days)).isoformat()
+        recent = [e for e in entries if e.get("date", "") >= cutoff]
+        recent.sort(key=lambda e: e.get("date", ""), reverse=True)
+        return jsonify({"stats": recent})
+
+    @app.route("/api/stats/summary", methods=["GET"])
+    @require_auth
+    def stats_summary():
+        """Return aggregated summary: totals and today's counts."""
+        username = g.username
+        entries = _load_stats(username)
+        total_words = sum(e.get("words_added", 0) for e in entries)
+        total_pushes = sum(e.get("push_count", 0) for e in entries)
+        total_syncs = sum(e.get("sync_count", 0) for e in entries)
+        total_logins = sum(e.get("login_count", 0) for e in entries)
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        today_entry = next((e for e in entries if e.get("date") == today), {})
+        return jsonify({
+            "total_words": total_words,
+            "today_words": today_entry.get("words_added", 0),
+            "total_pushes": total_pushes,
+            "total_syncs": total_syncs,
+            "total_logins": total_logins,
+            "streak_days": 0,  # placeholder: compute consecutive days if needed
+        })
+
+    @app.route("/api/esp/sync", methods=["GET"])
+    def esp_sync():
+        """Public endpoint for ESP-32 to poll latest stats (no auth)."""
+        # Use a shared namespace or the first available user's stats
+        # For simplicity, aggregate across all users or require a device ID
+        username = request.args.get("username", "")
+        if not username:
+            return jsonify({"error": "username required"}), 400
+        entries = _load_stats(username)
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        today_entry = next((e for e in entries if e.get("date") == today), {})
+        total_words = sum(e.get("words_added", 0) for e in entries)
+        return jsonify({
+            "words_today": today_entry.get("words_added", 0),
+            "words_total": total_words,
+            "last_updated": today,
+        })
 
     # ── /api/git ─────────────────────────────────────────────
 
@@ -727,6 +882,99 @@ def create_app():
         cfg["auth2_enabled"] = bool(data.get("enabled", True))
         _save_remote_access(cfg)
         return jsonify({"ok": True})
+
+    # ── /api/backup ─────────────────────────────────────────────
+    # SMB/NAS backup support via pysmb
+    # Config stored in data/backup_config.json (relative to DATA_DIR)
+
+    def _backup_config_path():
+        return os.path.join(app.config["DATA_DIR"], "backup_config.json")
+
+    def _load_backup_config():
+        p = _backup_config_path()
+        if not os.path.exists(p):
+            return {}
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                import json
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _save_backup_config(cfg):
+        p = _backup_config_path()
+        with open(p, "w", encoding="utf-8") as f:
+            import json
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+    @app.route("/api/backup/smb", methods=["GET"])
+    @require_auth
+    def backup_smb_get():
+        """Return SMB config without password."""
+        cfg = _load_backup_config()
+        return jsonify({
+            "host": cfg.get("host", ""),
+            "share": cfg.get("share", ""),
+            "username": cfg.get("username", ""),
+            "configured": bool(cfg.get("host")),
+        })
+
+    @app.route("/api/backup/smb", methods=["POST"])
+    @require_auth
+    def backup_smb_set():
+        """Save SMB configuration."""
+        username = g.username
+        data = request.get_json() or {}
+        host = data.get("host", "").strip()
+        share = data.get("share", "").strip()
+        smb_user = data.get("username", "").strip()
+        password = data.get("password", "")
+        if not host or not share:
+            return jsonify({"error": "host and share required"}), 400
+        cfg = {"host": host, "share": share, "username": smb_user, "password": password}
+        _save_backup_config(cfg)
+        return jsonify({"ok": True})
+
+    @app.route("/api/backup/run", methods=["POST"])
+    @require_auth
+    def backup_run():
+        """Trigger immediate backup: tar.gz + upload to SMB share."""
+        username = g.username
+        cfg = _load_backup_config()
+        if not cfg.get("host"):
+            return jsonify({"error": "SMB not configured"}), 400
+
+        try:
+            from datetime import datetime as _dt
+            timestamp = _dt.now().strftime("%Y%m%d-%H%M%S")
+            backup_name = f"ve-backup-{timestamp}.tar.gz"
+            data_dir = app.config["DATA_DIR"]
+            tar_path = os.path.join(data_dir, f".backup_{timestamp}.tar.gz")
+
+            # Create tar.gz of data directory
+            import tarfile
+            with tarfile.open(tar_path, "w:gz") as tar:
+                tar.add(data_dir, arcname="data")
+
+            # Upload via SMB
+            from smb.SMBConnection import SMBConnection
+            server = cfg["host"].rstrip("/")
+            share = cfg["share"].lstrip("/")
+            smb_user = cfg.get("username", "")
+            smb_pass = cfg.get("password", "")
+            conn = SMBConnection(smb_user, smb_pass, "vanilla-editor", server, use_ntlm_v2=True)
+            if not conn.connect(server, 445):
+                os.remove(tar_path)
+                return jsonify({"error": "Could not connect to SMB server"}), 500
+
+            with open(tar_path, "rb") as f:
+                conn.storeFile(share, f"/{backup_name}", f)
+            conn.close()
+            os.remove(tar_path)
+
+            return jsonify({"ok": True, "filename": backup_name})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     # ── /api/workspaces ────────────────────────────────────────
     # 工作区配置保存在 <repo_path>/.ve/ve_workspace.json（原地模式）
