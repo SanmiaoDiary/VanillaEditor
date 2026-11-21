@@ -218,6 +218,12 @@ class GitService:
         code, out, err = self._git(repo_path, *args)
         return out
 
+    def diff_worktree(self, username, doc_id):
+        """工作区当前全部未提交变更相对 HEAD 的 diff（含未暂存，AI 工具用，DESIGN 4.10.2）"""
+        repo_path = self.ensure_repo(username, doc_id)
+        _, out, _ = self._git(repo_path, "diff", "HEAD")
+        return out
+
     def pull(self, username, doc_id):
         """拉取默认 upstream；无 upstream 时回退到第一个远端（DESIGN 7.2）"""
         repo_path = self.ensure_repo(username, doc_id)

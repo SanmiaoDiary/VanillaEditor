@@ -4,6 +4,21 @@ All notable changes to VanillaEditor will be documented in this file.
 
 ---
 
+## [v0.5.0] - 2026-11-21
+
+### Added
+- **AI 助手扩展（DESIGN 4.10，全新）**：一个工具执行层、两个 AI 入口，让 AI 在 VE 里写作、编辑、同步和版本管理
+  - **MCP 服务器**：`POST /api/mcp`（Streamable HTTP，手写 JSON-RPC 2.0，ADR-005 零新依赖），14 个工具（文件读写/全文搜索/提交/历史/diff/分支/pull-push 同步），独立长效访问令牌（完整令牌仅生成时显示、随时重置），供 ZCode / Claude Desktop 等外部 AI 客户端接入操作工作区；远程访问关闭时与登录 API 一致仅限本机来源
+  - **内置 AI 助手**：侧边栏第五面板（`bi-stars`）聊天界面，OpenAI 兼容 API（DeepSeek / 智谱 / Kimi / Ollama 等），后端工具循环（上限 8 轮）+ 工具调用轨迹折叠展示；回复可复制 / 插入光标 / 替换选区；上下文可附加当前文件全文或选区；聊天记录仅存内存
+  - **设置页 AI 助手组**（菜单 6 组 → 7 组）：AI API 配置（Base URL / Key 不回显 / 模型 / 温度 / 测试连接）+ MCP 管理（开关 / 令牌 / 接入地址 / 客户端配置示例一键复制）
+  - **补齐缺口能力**：`GitService.diff_worktree`（未提交变更 diff）、AI 工具层文件删除/重命名（核心 API 此前无此端点）
+- **文档补齐（v0.4.4 提交 3231e71 遗漏）**：DESIGN 新增 8.11 SMB 备份、4.9.3 ESP-32 接口；创作激励进入 4.8.1 内置扩展清单；Stats API 状态由"规划中"改"已实现"并修正 report/export 口径（存储现状 `data/stats/<user>.json`）
+
+### Fixed
+- **聊天输入框 Enter 发送失效**：首版实现漏绑 `onkeydown`（浏览器实测中发现），补上 Enter 发送 / Shift+Enter 换行
+
+---
+
 ## [v0.4.4] - 2026-11-15
 
 ### Fixed

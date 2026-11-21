@@ -1,6 +1,6 @@
 # UI 实现状态清单
 
-> 依据：DESIGN.md v0.3.0（唯一设计文档）
+> 依据：DESIGN.md v0.5.0（唯一设计文档）
 > 本文件记录代码与设计文档的差异，**代码以设计文档为准逐步对齐**。完成一项勾选一项。
 
 ## 一、已实现但与设计不一致（需改代码）
@@ -73,7 +73,7 @@
 
 **设置页：**
 - [x] 左侧菜单重构为 6 组：工作台 / 账号管理 / 外观 / 网络和安全 / Git / 关于（DESIGN 3.4）✅ v0.3.1——工作台与外观为本地首版；设备管理/统计 API 对接待后续
-- [ ] 工作台统计页（DESIGN 3.4 工作台）：统计卡（累计/今日写字数、推送/同步/登录次数）+ GitHub 风格近一年写作格子（绿色 5 档）；依赖第 6 章 Stats API（`/api/stats`、`/api/stats/summary`）与 `user_stats` 表——**v0.3.1 已有本地统计卡首版，热力图待 Stats API**
+- [x] 工作台统计页（DESIGN 3.4 工作台）：统计卡（累计/今日写字数、推送/同步/登录次数）+ GitHub 风格近一年写作格子（绿色 5 档）✅ v0.4.4——Stats API（`/api/stats`、`/api/stats/summary`、`/api/stats/report`）已落地，存储为 `data/stats/<user>.json`（DESIGN 4.9 已同步现状，SQLite 为规划）；streak_days 暂为占位 0
 - [ ] Git 设置页（DESIGN 3.4 Git）：Git 个人信息（user.name/email）、远端仓库管理（含跟踪状态卡）、**自动推送开关**（新功能，见 4.4.2）、分支与历史入口；吸收原「配置远程仓库」模态框的管理内容——**v0.3.1 已有入口+自动推送开关，跟踪状态卡待接入**
 - [x] 外观设置组（主题下拉、字号滑块 12–24px、默认工作区布局下拉、显示隐藏文件开关）✅ v0.3.1——字号逻辑 `onFontSizeChange()` 已接入滑块
 - [x] 关于页扩展（DESIGN 3.4 关于）：补作者、版权信息、依赖清单（Python/Flask/Bootstrap/Icons/Git 版本）✅ v0.3.1
@@ -96,6 +96,7 @@
 - [x] `/api/auth/password` — 修改密码（DESIGN 4.1.3）✅ v0.3.1
 - [x] `/api/auth/refresh` — 刷新令牌有效期（DESIGN 4.1.3）✅ v0.3.1
 - [x] JWT `token_version` 吊销校验（`require_auth` 校验载荷 `ver`）✅ v0.3.1
+- [x] `/api/ai/*` + `/api/mcp` — AI 助手扩展（DESIGN 4.10）✅ v0.5.0——MCP Streamable HTTP 端点（手写 JSON-RPC 2.0，14 工具共用执行层）、内置助手聊天（OpenAI 兼容工具循环）、设置页 AI 组（菜单 6→7 组）、侧边栏第五面板（扩展开关控制入口）
 - [ ] `/api/extensions/upload` — 扩展上传安装（DESIGN 4.8.2.1）
 - [ ] 同步锁机制 — `data/locks/<remote>.lock`（DESIGN 7.5.1）
 - [ ] 自动推送逻辑 — 每次保存后 push 到默认远端（DESIGN 4.4.2）——**v0.3.1 已有开关 UI，逻辑待实现**

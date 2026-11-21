@@ -170,3 +170,52 @@ body { overflow: hidden; }
   background: var(--bs-border-color);
   margin: 4px 0;
 }
+
+/* ── AI 助手面板（DESIGN 3.3.5）────────────────────────── */
+.ve-ai-scroll { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.ve-ai-msg { display: flex; }
+.ve-ai-msg-user { justify-content: flex-start; }
+.ve-ai-msg-user .ve-ai-bubble {
+  background: var(--bs-tertiary-bg);
+  border-left: 2px solid var(--ve-accent);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 100%;
+}
+.ve-ai-msg-ai .ve-ai-bubble {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.ve-ai-msg-ai .ve-ai-bubble pre { font-size: 11px; margin: 4px 0; }
+.ve-ai-msg-ai .ve-ai-bubble p:last-child { margin-bottom: 0; }
+.ve-ai-trace { margin-top: 6px; font-size: 11px; }
+.ve-ai-trace summary {
+  cursor: pointer;
+  color: var(--bs-secondary-color);
+  list-style: none;
+  display: flex;
+  align-items: center;
+}
+.ve-ai-trace summary::before { content: '▸'; margin-right: 4px; }
+.ve-ai-trace[open] summary::before { content: '▾'; }
+.ve-ai-trace-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+  color: var(--bs-body-color);
+}
+.ve-ai-trace-row code { color: var(--bs-secondary-color); }
+.ve-ai-trace-err { color: var(--bs-danger); }
+.ve-ai-trace-err i { color: var(--bs-danger); }
+.ve-ai-ops { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.ve-ai-input { flex-shrink: 0; background: var(--bs-body-bg); }
+.ve-ai-input textarea { resize: none; }

@@ -11,8 +11,13 @@ from datetime import datetime, timezone, timedelta
 import bcrypt
 
 from app.git.service import GitService
+from app.ai import mcp as ai_mcp
+from app.ai import provider as ai_provider
+from app.ai import tools as ai_tools
 
 DEFAULT_PORT = 58446
+# 后端版本单点（MCP serverInfo 等使用；与前端 VE_VERSION、DESIGN/CHANGELOG 同步 bump）
+VE_VERSION = "v0.5.0"
 
 
 def _port_free(host, port):
@@ -975,6 +980,266 @@ def create_app():
             return jsonify({"ok": True, "filename": backup_name})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+
+    # ── /api/ai + /api/mcp ─────────────────────────────────────
+    # AI 助手扩展（DESIGN 4.10）：内置助手（OpenAI 兼容）+ MCP 服务器（Streamable HTTP）
+    # 配置存储：data/ai/<username>.json（JSON 先例见 /api/stats；SQLite 迁移规划见第 5 章）
+
+    def _ai_config_path(username):
+        return os.path.join(app.config["DATA_DIR"], "ai", f"{username}.json")
+
+    def _load_ai_config(username):
+        p = _ai_config_path(username)
+        if not os.path.exists(p):
+            return {}
+        try:
+            import json as _json
+            with open(p, encoding="utf-8") as f:
+                return _json.load(f)
+        except (_json.JSONDecodeError, OSError):
+            return {}
+
+    def _save_ai_config(username, cfg):
+        import json as _json
+        os.makedirs(os.path.dirname(_ai_config_path(username)), exist_ok=True)
+        with open(_ai_config_path(username), "w", encoding="utf-8") as f:
+            _json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+    def _verify_mcp_token():
+        """校验 MCP 访问令牌（DESIGN 4.10.3）：返回对应用户名，无效返回 None。
+        令牌与 JWT 无关、不过期；mcp_enabled 关闭即整体拒绝。"""
+        import hmac as _hmac
+        token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+        if not token.startswith("ve-ai-"):
+            return None
+        ai_dir = os.path.join(app.config["DATA_DIR"], "ai")
+        if not os.path.isdir(ai_dir):
+            return None
+        import json as _json
+        for fn in os.listdir(ai_dir):
+            if not fn.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(ai_dir, fn), encoding="utf-8") as f:
+                    cfg = _json.load(f)
+            except (_json.JSONDecodeError, OSError):
+                continue
+            stored = cfg.get("mcp_token", "")
+            if cfg.get("mcp_enabled") and stored and _hmac.compare_digest(stored, token):
+                return fn[:-5]
+        return None
+
+    def _ai_tool_executor(username):
+        """绑定用户后的工具执行器（MCP 与内置助手共用，DESIGN 4.10.1）"""
+        def run(name, args):
+            return ai_tools.execute_tool(username, name, args, git_service, app.config["DATA_DIR"])
+        return run
+
+    _AI_SYSTEM_PROMPT = (
+        "你是 VanillaEditor（VE）内置的写作助手，运行在用户的自托管 Markdown 编辑器里。"
+        "你可以通过提供的工具直接操作用户的写作工作区：读写文件、全文搜索、Git 提交与版本管理、"
+        "分支操作与 pull/push 同步。约定：\n"
+        "1. 先用 ve_list_workspaces 获取工作区（doc_id），再做具体操作。\n"
+        "2. 修改文件前先 ve_read_file 确认现状；提交前可用 ve_diff 查看未提交变更。\n"
+        "3. 完成一组相关修改后用 ve_commit 提交，提交信息用中文、简洁描述意图。\n"
+        "4. ve_restore 会永久丢弃提交与未提交变更，仅在用户明确要求回退时使用。\n"
+        "5. 用户没有明确要求时不要 push；ve_write_file 不带 commit_message 就不会自动提交。\n"
+        "6. 用简体中文回复，回复中的 Markdown 会在编辑器面板渲染。"
+    )
+
+    def _ai_summarize_args(args):
+        """工具调用轨迹里收长参数（如 write_file 的 content），避免 trace 过大"""
+        out = {}
+        for k, v in (args or {}).items():
+            s = str(v)
+            out[k] = s if len(s) <= 200 else s[:200] + f"…（共 {len(s)} 字符）"
+        return out
+
+    @app.route("/api/mcp", methods=["POST"])
+    def mcp_endpoint():
+        """MCP Streamable HTTP 端点（DESIGN 4.10.3）：MCP 令牌鉴权，与 JWT 无关。
+        远程访问关闭时受 _check_remote_access 约束仅本机可连，与登录 API 一致。"""
+        username = _verify_mcp_token()
+        if not username:
+            return jsonify({"error": "无效的 MCP 令牌"}), 401
+        body = request.get_json(silent=True)
+        if body is None:
+            return jsonify({"jsonrpc": "2.0", "id": None,
+                            "error": {"code": -32700, "message": "Parse error"}}), 400
+        resp, session_id = ai_mcp.handle_mcp_request(
+            username, body, _ai_tool_executor(username), VE_VERSION)
+        headers = {}
+        if session_id:
+            headers["Mcp-Session-Id"] = session_id
+        if resp is None:
+            return ("", 202, headers)
+        return jsonify(resp), 200, headers
+
+    @app.route("/api/mcp", methods=["DELETE"])
+    def mcp_delete_session():
+        # 无状态实现（DESIGN 4.10.3）：无会话可终止，按规范确认即可
+        return ("", 200)
+
+    @app.route("/api/ai/config", methods=["GET"])
+    @require_auth
+    def ai_config_get():
+        """AI API 配置读取；api_key 不回显（对齐 /api/backup/smb 口径）"""
+        cfg = _load_ai_config(g.username)
+        api = cfg.get("api", {})
+        return jsonify({
+            "base_url": api.get("base_url", ""),
+            "model": api.get("model", ""),
+            "temperature": api.get("temperature", 0.7),
+            "has_api_key": bool(api.get("api_key")),
+            "mcp_enabled": cfg.get("mcp_enabled", False),
+        })
+
+    @app.route("/api/ai/config", methods=["POST"])
+    @require_auth
+    def ai_config_set():
+        data = request.get_json() or {}
+        cfg = _load_ai_config(g.username)
+        api = cfg.setdefault("api", {})
+        if "base_url" in data:
+            api["base_url"] = data["base_url"].strip()
+        if "model" in data:
+            api["model"] = data["model"].strip()
+        if "temperature" in data:
+            try:
+                api["temperature"] = max(0.0, min(2.0, float(data["temperature"])))
+            except (TypeError, ValueError):
+                pass
+        api_key = data.get("api_key", "")
+        if api_key:  # 留空表示不修改（DESIGN 3.4 AI 助手组）
+            api["api_key"] = api_key
+        _save_ai_config(g.username, cfg)
+        return jsonify({"ok": True})
+
+    @app.route("/api/ai/test", methods=["POST"])
+    @require_auth
+    def ai_test():
+        """测试 AI API 连通性；允许用未保存的临时 api_key 先测"""
+        data = request.get_json() or {}
+        api = dict(_load_ai_config(g.username).get("api", {}))
+        if data.get("api_key"):
+            api["api_key"] = data["api_key"]
+        for k in ("base_url", "model"):
+            if data.get(k):
+                api[k] = data[k]
+        try:
+            info = ai_provider.test_connection(api)
+            return jsonify({"ok": True, **info})
+        except ai_provider.AIProviderError as e:
+            return jsonify({"ok": False, "error": str(e)})
+
+    @app.route("/api/ai/chat", methods=["POST"])
+    @require_auth
+    def ai_chat():
+        """内置助手聊天：后端完成 OpenAI tools 工具循环（DESIGN 4.10.4），上限 8 轮"""
+        data = request.get_json() or {}
+        messages = data.get("messages") or []
+        context = data.get("context")
+        if not isinstance(messages, list) or not messages:
+            return jsonify({"error": "messages 不能为空"}), 400
+        if len(messages) > 40:
+            return jsonify({"error": "消息轮数过多（上限 40 条）"}), 400
+        total = sum(len(str(m.get("content") or "")) for m in messages)
+        if total > 200_000:
+            return jsonify({"error": "消息总长超出限制（20 万字符）"}), 400
+        api = _load_ai_config(g.username).get("api", {})
+        try:
+            ai_provider.validate_cfg(api)
+        except ai_provider.AIProviderError as e:
+            return jsonify({"error": str(e)}), 400
+
+        full = [{"role": "system", "content": _AI_SYSTEM_PROMPT}]
+        if isinstance(context, dict):
+            ctx = []
+            if context.get("doc_id"):
+                ctx.append(f"当前工作区 doc_id：{context['doc_id']}")
+            if context.get("path"):
+                ctx.append(f"当前文件：{context['path']}")
+            if context.get("selection"):
+                ctx.append("用户当前选中的文字：\n```\n" + str(context["selection"])[:20_000] + "\n```")
+            elif context.get("content"):
+                ctx.append("当前文件全文：\n```\n" + str(context["content"])[:100_000] + "\n```")
+            if ctx:
+                full.append({"role": "system", "content": "\n".join(ctx)})
+        # 前端历史仅含 user/assistant 文本轮次
+        for m in messages:
+            if m.get("role") in ("user", "assistant") and m.get("content"):
+                full.append({"role": m["role"], "content": str(m["content"])})
+
+        import time as _time
+        import json as _json
+        trace = []
+        try:
+            for _round in range(8):
+                msg = ai_provider.chat_completion(api, full, tools=ai_tools.openai_tools())
+                full.append(msg)
+                calls = msg.get("tool_calls") or []
+                if not calls:
+                    return jsonify({"reply": msg.get("content") or "", "tool_trace": trace})
+                for tc in calls:
+                    fn = tc.get("function") or {}
+                    name = fn.get("name", "")
+                    try:
+                        args = _json.loads(fn.get("arguments") or "{}")
+                    except _json.JSONDecodeError:
+                        args = {}
+                    t0 = _time.time()
+                    try:
+                        result = ai_tools.execute_tool(g.username, name, args, git_service, app.config["DATA_DIR"])
+                        ok = True
+                    except ai_tools.ToolError as e:
+                        result, ok = {"error": str(e)}, False
+                    except Exception as e:  # noqa: BLE001 工具内部错误也回传给模型继续对话
+                        result, ok = {"error": f"工具内部错误: {e}"}, False
+                    trace.append({"tool": name, "args": _ai_summarize_args(args),
+                                  "ok": ok, "ms": int((_time.time() - t0) * 1000)})
+                    full.append({"role": "tool", "tool_call_id": tc.get("id", ""),
+                                 "content": _json.dumps(result, ensure_ascii=False)})
+            return jsonify({"reply": "已达单次请求工具调用轮次上限（8 轮），请拆分任务或直接提问。",
+                            "tool_trace": trace})
+        except ai_provider.AIProviderError as e:
+            return jsonify({"error": str(e), "tool_trace": trace}), 502
+
+    @app.route("/api/ai/mcp/status", methods=["GET"])
+    @require_auth
+    def ai_mcp_status():
+        cfg = _load_ai_config(g.username)
+        token = cfg.get("mcp_token", "")
+        return jsonify({
+            "mcp_enabled": cfg.get("mcp_enabled", False),
+            "has_token": bool(token),
+            "token_masked": (token[:10] + "…" + token[-4:]) if len(token) > 14 else "",
+            "endpoint": f"http://{_get_lan_ip()}:{app.config['PORT']}/api/mcp",
+        })
+
+    @app.route("/api/ai/mcp/token", methods=["POST"])
+    @require_auth
+    def ai_mcp_token():
+        """生成/重新生成 MCP 访问令牌（旧令牌立即失效）；完整令牌仅本次响应返回"""
+        import secrets as _secrets
+        cfg = _load_ai_config(g.username)
+        cfg["mcp_token"] = "ve-ai-" + _secrets.token_urlsafe(32)
+        cfg["mcp_enabled"] = True  # 生成令牌即启用
+        _save_ai_config(g.username, cfg)
+        return jsonify({"ok": True, "token": cfg["mcp_token"], "mcp_enabled": True})
+
+    @app.route("/api/ai/mcp/toggle", methods=["POST"])
+    @require_auth
+    def ai_mcp_toggle():
+        data = request.get_json() or {}
+        cfg = _load_ai_config(g.username)
+        cfg["mcp_enabled"] = bool(data.get("enabled", False))
+        generated = None
+        if cfg["mcp_enabled"] and not cfg.get("mcp_token"):
+            import secrets as _secrets
+            cfg["mcp_token"] = "ve-ai-" + _secrets.token_urlsafe(32)
+            generated = cfg["mcp_token"]
+        _save_ai_config(g.username, cfg)
+        return jsonify({"ok": True, "mcp_enabled": cfg["mcp_enabled"], "token": generated})
 
     # ── /api/workspaces ────────────────────────────────────────
     # 工作区配置保存在 <repo_path>/.ve/ve_workspace.json（原地模式）

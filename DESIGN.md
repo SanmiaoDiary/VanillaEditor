@@ -1,6 +1,6 @@
 # VanillaEditor 设计文档
 
-> 版本：v0.4.4 ｜ 最后更新：2026-11-15
+> 版本：v0.5.0 ｜ 最后更新：2026-11-21
 
 ---
 
@@ -27,8 +27,12 @@ VanillaEditor 是一款**分布式多用户离线 Markdown 编辑器**。部署�
 VanillaEditor/
 ├── app/                  # Flask 后端
 │   ├── routes.py         # 所有 API 路由（单一入口）
-│   └── git/
-│       └── service.py    # Git 操作封装
+│   ├── git/
+│   │   └── service.py    # Git 操作封装
+│   └── ai/               # AI 助手与 MCP 服务器（见 4.10）
+│       ├── tools.py      # AI 工具执行层（MCP 与内置助手共用）
+│       ├── mcp.py        # MCP 协议处理（JSON-RPC 2.0）
+│       └── provider.py   # OpenAI 兼容 API 客户端
 ├── static/               # 前端（无需构建）
 │   ├── index.html        # 页面骨架
 │   ├── css/app.css       # 自定义样式
@@ -91,6 +95,10 @@ app/
 - `/api/access/*` — 远程访问配置
 - `/api/workspaces/*` — 工作区管理
 - `/api/fs/*` — 服务器文件系统浏览
+- `/api/stats/*` — 写作统计（见 4.9）
+- `/api/backup/*` — SMB 备份（见 8.11）
+- `/api/ai/*` — AI 助手（配置 / 聊天 / MCP 令牌，见 4.10）
+- `/api/mcp` — MCP 服务器端点（Streamable HTTP，见 4.10.3）
 
 ---
 
@@ -294,7 +302,7 @@ develop（显示分支）（分支切换按钮） | （字数显示）2064 字 �
 
 ### 3.3 编辑器侧边栏面板
 
-侧边栏由 activity bar 切换，共 4 个面板（图标从上到下）：资源管理器（`bi-files`）、版本管理（`bi-git`）、同步（`bi-arrow-repeat`）、扩展（`bi-puzzle`）。每个面板头部为标题行 + 上下文操作按钮区（见 3.1 ASCII 图）。
+侧边栏由 activity bar 切换，共 5 个面板（图标从上到下）：资源管理器（`bi-files`）、版本管理（`bi-git`）、同步（`bi-arrow-repeat`）、扩展（`bi-puzzle`）、AI 助手（`bi-stars`，随「AI 助手」扩展启用显示，见 3.3.5）。每个面板头部为标题行 + 上下文操作按钮区（见 3.1 ASCII 图）。
 
 #### 3.3.1 资源管理器面板（`bi-files`）
 
@@ -415,9 +423,48 @@ develop（显示分支）（分支切换按钮） | （字数显示）2064 字 �
 - **本地第三方扩展**：规划功能（`.ve/extensions/` + manifest.json，见 4.8），UI 上「从 zip 安装」按钮先行占位
 - 空态引导：「所有内置扩展已启用」或列表为空时的说明文案
 
+#### 3.3.5 AI 助手面板（`bi-stars`）
+
+第五个侧边栏面板，随扩展「AI 助手」启用后显示（见 4.10）：
+
+```
+AI 助手
+----------------------------------------------------------------
+┌──────────────────────────────────────────────────────────────┐
+│ ▌ 用户                                                       │
+│ 帮我把第三章的开头改得更有悬念一点                            │
+│                                                              │
+│ ▌ AI                                    deepseek-chat        │
+│ 我重写了开头两段，制造了雨夜的悬念氛围……（Markdown 渲染）    │
+│ ┌ 工具调用 ▸ ve_write_file(chapter3.md) ✓ 1.2s ┐（折叠轨迹） │
+│                                                              │
+│ [复制] [插入光标] [替换选区]     ← 操作排（见交互说明）       │
+└──────────────────────────────────────────────────────────────┘
+----------------------------------------------------------------
+┌──────────────────────────────────────────────────────────────┐
+│ ☑ 附加当前文件  ☐ 仅选区          （上下文开关）             │
+│ ┌──────────────────────────────────────────────────────────┐ │
+│ │ 输入消息，Enter 发送…                        [发送] ➤    │ │
+│ └──────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
+[清空会话]                                    [模型配置 ⚙](设置页)
+```
+
+**交互说明：**
+
+| 元素 | 行为 |
+|------|------|
+| 消息气泡 | 用户消息靠左（强调色边线）；AI 回复 Markdown 渲染（复用预览 `parseMd`）；工具调用轨迹默认折叠，点击展开显示每次调用的工具名、参数摘要、耗时与结果状态 |
+| 操作排 | 「复制」复制回复原文；「插入光标」把回复插入编辑器光标处；「替换选区」替换编辑器当前选区（无选区时禁用）；AI 直接改文件走工具（`ve_write_file`），不经这三个按钮 |
+| 上下文开关 | 「附加当前文件」：把当前标签页全文作为上下文随消息发送；「仅选区」：只附加选中文字；关闭则纯聊天 |
+| 空态/未配置 | 未配置 AI API 时显示引导文案 +「去设置」按钮（跳设置页 AI 助手组）；扩展开关关闭时面板入口隐藏 |
+| 清空会话 | 确认模态框后清空本地聊天历史（聊天记录仅存内存，不入库） |
+| 发送中 | 输入框禁用 + 发送按钮转加载态；工具循环由后端完成，一次请求返回最终结果 |
+
+
 ### 3.4 设置页
 
-结构：左侧竖向菜单（200px，可收起）+ 右侧内容卡片；非手风琴。用户点击左侧菜单项跳转到对应设置界面。菜单共 6 组：
+结构：左侧竖向菜单（200px，可收起）+ 右侧内容卡片；非手风琴。用户点击左侧菜单项跳转到对应设置界面。菜单共 7 组：
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -429,9 +476,10 @@ develop（显示分支）（分支切换按钮） | （字数显示）2064 字 �
 │ ▸ 账号管理  │  │  [推送 45 次] [同步 128 次] [登录 23 次] │    │
 │ ▸ 外观     │  │                                         │    │
 │ ▸ 网络和安全│  │  ▢▢▣▣▢▢▢▢▢▢  ← 近一年写作格子     │    │
-│ ▸ Git      │  │  ▢▣▣▢▢▢▢▢▢▢    （越绿 = 当日字数越多）│    │
-│ ▸ 关于     │  └─────────────────────────────────────────┘    │
-│            │         （右侧内容卡片，随左侧菜单切换）        │
+│ ▸ AI 助手  │  │  ▢▣▣▢▢▢▢▢▢▢    （越绿 = 当日字数越多）│    │
+│ ▸ Git      │  └─────────────────────────────────────────┘    │
+│ ▸ 关于     │         （右侧内容卡片，随左侧菜单切换）        │
+│            │                                                  │
 │ ◂（收起）   │                                                  │
 ├────────────┴─────────────────────────────────────────────────┤
 │ VanillaEditor v0.3.0                            10:22:33      │
@@ -603,7 +651,57 @@ develop（显示分支）（分支切换按钮） | （字数显示）2064 字 �
 
 > Git 远端仓库配置在「Git」页（见下）；同步状态总览、冲突文件、同步日志等**运行态信息**在编辑器同步面板展示（见 3.3.3），设置页只承担管理职责。
 
-#### 5. Git
+#### 5. AI 助手
+
+AI 扩展的配置入口（功能设计见 4.10）：上半部分为内置助手的 AI API 连接配置，下半部分为 MCP 服务器（供外部 AI 客户端接入）。
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│ AI 助手                                                        │
+├────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ AI API（OpenAI 兼容）                                    │  │
+│  │ ─────────────────────────────────────────────────────   │  │
+│  │  Base URL  [https://api.deepseek.com/v1    ]             │  │
+│  │  API Key   [************        ]（留空表示不修改）      │  │
+│  │  模型      [deepseek-chat                   ]            │  │
+│  │  温度      [0.7]（0–2，越高越发散）                       │  │
+│  │                                                          │  │
+│  │  [测试连接]  [保存配置]                                  │  │
+│  │  ✓ 连接成功：deepseek-chat（deepseek）                   │  │
+│  └─────────────────────────────────────────────────────────┘  │
+│                                                                │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ MCP 服务器（外部 AI 客户端接入）          [◉ 开启]       │  │
+│  │ ─────────────────────────────────────────────────────   │  │
+│  │  接入地址：http://192.168.3.162:58446/api/mcp   [复制]   │  │
+│  │  访问令牌：ve-ai-********************            [复制]   │  │
+│  │  [重新生成令牌]                                          │  │
+│  │                                                          │  │
+│  │  客户端配置示例（ZCode / 通用 Streamable HTTP）：        │  │
+│  │  ┌──────────────────────────────────────────────────┐   │  │
+│  │  │ { "mcpServers": { "vanillaeditor": {             │   │  │
+│  │  │   "url": "http://192.168.3.162:58446/api/mcp",   │   │  │
+│  │  │   "headers": { "Authorization":                  │   │  │
+│  │  │     "Bearer ve-ai-…" } } } }                     │   │  │
+│  │  └──────────────────────────────────────────────────┘   │  │
+│  │  [复制配置示例]                                          │  │
+│  └─────────────────────────────────────────────────────────┘  │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+| 设置项 | 控件 | 说明 |
+|--------|------|------|
+| Base URL | 输入框 | OpenAI 兼容服务地址（如 `https://api.deepseek.com/v1`、`http://localhost:11434/v1`），见 4.10.4 |
+| API Key | 密码框 | 保存后不回显（显示占位）；留空提交表示保持原值 |
+| 模型 / 温度 | 输入框 | 模型名（如 `deepseek-chat`）；温度 0–2，默认 0.7 |
+| 测试连接 | 按钮 | 后端发一次最小请求，返回模型名与提供商或错误信息 |
+| MCP 开关 | switch | 开启后外部 AI 客户端可经 `/api/mcp` 访问（令牌鉴权，见 4.10.3）；关闭仅影响 MCP 端点，不影响内置助手 |
+| 接入地址 / 令牌 | 只读+复制 | 令牌仅在生成时完整显示一次，之后脱敏；「重新生成令牌」需确认（旧令牌立即失效） |
+| 配置示例 | 代码块 | 按当前 host 与令牌自动填充的 ZCode/通用 MCP 客户端 JSON，一键复制 |
+
+#### 6. Git
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -648,7 +746,7 @@ develop（显示分支）（分支切换按钮） | （字数显示）2064 字 �
 | 自动推送         | switch      | 默认关闭；开启后每次保存成功自动 `git push` 到默认远端（见 4.4.2）         |
 | 分支与历史入口   | 按钮组      | 添加新分支 / 切换分支 / 合并分支 / 回退版本（模态框，与 Git 菜单一致）     |
 
-#### 6. 关于
+#### 7. 关于
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -1344,7 +1442,9 @@ develop（显示分支）（分支切换按钮） | （字数显示）2064 字 �
   - 图片粘贴（见 4.7）
   - 自动保存（停止输入 1.5 秒后保存，见 3.7 规范 4）
   - 拼写检查（规划）
-- 开关状态保存于用户配置（config.db / localStorage）
+  - 创作激励（ESP-32 硬件摆件联动 + 写作热力图，协议见 `docs/esp32-protocol.md`，统计见 4.9）
+  - AI 助手（编辑器内 AI 聊天 + MCP 服务器，见 4.10，面板见 3.3.5，设置见 3.4 AI 助手组）
+- 开关状态保存于用户配置（config.db / localStorage，当前实现为 localStorage `ve_ext_<id>`）
 
 #### 4.8.2 本地第三方扩展（规划）
 
@@ -1433,12 +1533,133 @@ const VE = {
 | `sync_count` | 每次成功 `git pull`（从远端拉取到新提交） | 同步面板「拉取」/ 自动同步 |
 | `login_count` | 每次成功登录 | `/api/auth/login` 返回 JWT |
 
-数据聚合：按天（`date` 字段）存储于 `user_stats` 表，查询时返回近 N 天数组。
+数据聚合：按天（`date` 字段）存储，查询时返回近 N 天数组。存储现状：`data/stats/<username>.json`（JSON 数组，v0.4.4 实现）；规划中的 SQLite `user_stats` 表见第 5 章。
+
+#### 4.9.3 ESP-32 摆件接口
+
+`GET /api/esp/sync?username=<name>`（免鉴权，局域网内）供 ESP-32 摆件轮询 `{words_today, words_total, last_updated}`；硬件协议（WiFi 配网、固件示例、显示布局）见 `docs/esp32-protocol.md`。
 
 #### 4.9.2 实时性
 
 - 工作台数据**不实时刷新**，进入设置页时加载（见 3.4 mockup）
 - 编辑中实时展示：字数统计在状态栏实时更新（每次按键后重新计算当前文件字符数）
+
+### 4.10 AI 助手与 MCP 服务器
+
+VE 的 AI 扩展：让 AI 在 VE 里写作、编辑、同步和版本管理。核心架构是**一个工具执行层、两个 AI 入口**——外部 AI 客户端与内置助手走同一套工具（`app/ai/tools.py`），能力完全一致，实现只维护一份。
+
+#### 4.10.1 架构总览
+
+```
+外部 AI 客户端                     VE 内置 AI 助手
+（ZCode / Claude Desktop /         （侧边栏 AI 面板，
+ Cursor / 任意 MCP 客户端）          设置页配置 OpenAI 兼容 API）
+        │                                  │
+        │ POST /api/mcp                    │ POST /api/ai/chat
+        │ Streamable HTTP（JSON-RPC 2.0）  │ OpenAI tools + 工具循环
+        │ 鉴权：MCP 访问令牌               │ 鉴权：JWT（require_auth）
+        └───────────────┬──────────────────┘
+                        ▼
+        ┌─────────────────────────────────────┐
+        │ app/ai/tools.py  execute_tool()     │
+        │ 14 个工具（见 4.10.2），复用        │
+        │ GitService，路径防穿越，用户隔离    │
+        └─────────────────────────────────────┘
+                        ▼
+        工作区（原地模式，Git 仓库即源目录）
+```
+
+#### 4.10.2 工具清单（14 个）
+
+| 工具 | 参数 | 说明 |
+|------|------|------|
+| `ve_list_workspaces` | — | 列出当前用户的全部工作区（id、名称、源路径、可用性） |
+| `ve_list_files` | `doc_id, subpath?` | 列出工作区文件（排除 `.git`） |
+| `ve_read_file` | `doc_id, path` | 读取文件全文（UTF-8） |
+| `ve_write_file` | `doc_id, path, content, commit_message?` | 写入文件；携带 `commit_message` 时立即提交（前缀 `ai:`），否则留待显式提交 |
+| `ve_delete_file` | `doc_id, path, commit_message?` | 删除文件；提交语义同上 |
+| `ve_rename_file` | `doc_id, path, new_path, commit_message?` | 重命名/移动文件（补核心 API 缺口） |
+| `ve_search_in_files` | `doc_id, query` | 全文搜索（逐文件子串匹配，返回 文件:行号:行内容，上限 50 条） |
+| `ve_commit` | `doc_id, message` | `git add -A` + 提交 |
+| `ve_history` | `doc_id, count?` | 提交历史（sha / message / author / date） |
+| `ve_diff` | `doc_id` | 未提交变更的 diff（补核心 API 缺口，走 `GitService.diff`） |
+| `ve_restore` | `doc_id, sha` | `git reset --hard` 回退到指定提交（**危险**：丢弃未提交变更与回退点之后的提交） |
+| `ve_branch` | `doc_id, action?, name?` | `list`（默认）/ `create` / `switch` 分支操作 |
+| `ve_sync` | `doc_id, direction` | `pull` / `push`（upstream 回退策略见 7.2） |
+| `ve_sync_status` | `doc_id` | 跟踪分支、ahead/behind、冲突、未提交状态、远端列表 |
+
+#### 4.10.3 MCP 服务器
+
+**协议与端点**：MCP Streamable HTTP 传输，手写 JSON-RPC 2.0 实现（`app/ai/mcp.py`，ADR-005）。
+
+| 项 | 说明 |
+|----|------|
+| 端点 | `POST /api/mcp`，请求体为单个 JSON-RPC 2.0 消息 |
+| 支持方法 | `initialize`（回显协商 protocolVersion：2024-11-05 / 2025-03-26 / 2025-06-18）、`notifications/initialized`（返回 202 无 body）、`ping`、`tools/list`、`tools/call` |
+| 响应 | `application/json`（规范允许非流式 JSON 响应）；notification 返回 HTTP 202 空 body |
+| 会话 | `initialize` 下发 `Mcp-Session-Id` 响应头；无状态实现，不强制校验后续请求的会话头 |
+| 协议错误 | -32700 解析错误 / -32601 方法不存在 / -32602 参数无效；工具执行失败按 MCP 规范以 `isError: true` 的调用结果返回，不算协议错误 |
+| `tools/call` 结果 | `{content: [{type: "text", text: <JSON 结果>}], isError?}` |
+
+**鉴权**：MCP 访问令牌（`ve-ai-` 前缀 + 43 位随机串），与 JWT 无关、不过期、设置页可随时重新生成（旧令牌立即失效）。请求头 `Authorization: Bearer ve-ai-…`，令牌→用户映射决定操作哪个用户的工作区。令牌丢失只可重新生成，不回显。
+
+**安全模型**：
+1. MCP 端点受远程访问总开关约束（与 `/api/auth/login` 一致，见 4.5.1）：远程访问关闭时仅本机来源可连；开启时任何来源必须携带有效令牌
+2. 所有文件路径经 `normpath` + 工作区前缀校验，防穿越与符号链接逃逸（对齐 9.1 规则 4）
+3. 数据按令牌对应用户隔离，仅能访问该用户注册的工作区
+4. `ve_restore` 为危险操作，工具描述中显式警告；内置助手调用前由模型自行评估，MCP 客户端可在自己的审批机制里拦截
+
+**客户端接入示例**（设置页「复制配置示例」一键生成，按当前 host 与令牌填充）：
+
+```json
+{
+  "mcpServers": {
+    "vanillaeditor": {
+      "url": "http://192.168.3.162:58446/api/mcp",
+      "headers": { "Authorization": "Bearer ve-ai-xxxxxxxx…" }
+    }
+  }
+}
+```
+
+#### 4.10.4 内置 AI 助手
+
+侧边栏第五面板（见 3.3.5），通过设置页配置 OpenAI 兼容 API（DeepSeek、智谱、Kimi、Ollama、OpenRouter 等均兼容）：
+
+| 配置 | 说明 |
+|------|------|
+| Base URL | `/v1` 级地址，拼接 `/chat/completions` 调用 |
+| API Key | 存 `data/ai/<username>.json`；GET 不回显（返回 `has_api_key`） |
+| 模型 / 温度 | 默认温度 0.7 |
+
+**工具循环**（`POST /api/ai/chat`，后端完成，一次请求返回最终结果）：
+
+```
+前端消息（+ 上下文：当前文件全文/选区）
+    ↓
+system 提示词（VE 写作助手身份 + 工具使用指引）拼入消息
+    ↓
+调用 /chat/completions（携带 14 个工具的 JSON Schema）
+    ↓ 返回 tool_calls？
+是 → execute_tool() 逐个执行 → 结果作为 tool 消息追加 → 回到上一步（上限 8 轮）
+否 → 返回 {reply, tool_trace} 给前端渲染
+```
+
+- 聊天历史仅存前端内存（刷新即清空，不入库）
+- `tool_trace` 记录每次调用的工具名、参数摘要、耗时、成功与否，前端折叠展示（见 3.3.5）
+- 回复不直接改文件——AI 想改文件必须走 `ve_write_file` 工具（留下 `ai:` 提交痕迹）；「插入光标 / 替换选区」是用户主动应用的通道
+
+#### 4.10.5 数据存储
+
+`data/ai/<username>.json`（JSON，对齐 4.9 的 JSON 存储先例，SQLite 迁移规划见第 5 章）：
+
+```json
+{
+  "mcp_enabled": true,
+  "mcp_token": "ve-ai-…",
+  "api": { "base_url": "https://api.deepseek.com/v1", "api_key": "…", "model": "deepseek-chat", "temperature": 0.7 }
+}
+```
 
 ---
 
@@ -1453,6 +1674,7 @@ const VE = {
 | `devices`    | id、user_id、device_name、list_state、locked、last_seen | 登录设备管理；list_state 为 none/whitelist/blacklist（见 4.1.2） |
 | `config`     | key、value                                              | VE 全局与用户配置（key-value）                                   |
 | `user_stats` | id、user_id、date、words_added、push_count、sync_count、login_count | 按天聚合的写作/操作统计（见 3.4 工作台、6 章 Stats API）；每次保存时按当日字数差值累加 words_added，push/sync/login 各自 +1 |
+| `ai_config` | user_id、base_url、api_key、model、temperature、mcp_enabled、mcp_token | AI 助手与 MCP 服务器配置（见 4.10）；当前实现为 `data/ai/<username>.json` |
 
 ## 6. API 完整参考
 
@@ -1534,13 +1756,27 @@ const VE = {
 | POST   | `/api/devices/<device_id>/blacklist` | ✓    | 加入黑名单                       |
 | POST   | `/api/devices/<device_id>/lock`      | ✓    | 锁定设备（锁定后仅管理员可操作） |
 
-### Stats（规划中，见 3.4 工作台）
+### Stats（见 3.4 工作台，v0.4.4 已实现）
 
 | 方法 | 路径                 | 认证 | 说明                                                                 |
 |------|----------------------|------|----------------------------------------------------------------------|
 | GET  | `/api/stats?days=365` | ✓    | 返回当前用户近 N 天的按天统计（date、words_added、push/sync/login 计数），供工作台统计卡与写作格子使用 |
 | GET  | `/api/stats/summary` | ✓    | 返回汇总：累计写字数、今日写字数、累计推送/同步/登录次数             |
-| POST | `/api/stats/export`  | ✓    | 导出近期统计数据为 JSON（用于迁移或备份）                           |
+| POST | `/api/stats/report`  | 可选 | 上报按天统计增量（date 必填；免鉴权时落到 `username`/`guest`，供 ESP-32 场景） |
+| GET  | `/api/esp/sync?username=x` | 无 | ESP-32 摆件轮询 `{words_today, words_total, last_updated}`（见 4.9.3） |
+
+### AI / MCP（见 4.10，v0.5.0 新增）
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| POST | `/api/mcp` | MCP 令牌 | MCP Streamable HTTP 端点（JSON-RPC 2.0：initialize / tools/list / tools/call / ping） |
+| GET | `/api/ai/config` | ✓ | 读取 AI API 配置（`api_key` 不回显，返回 `has_api_key`）与 MCP 状态 |
+| POST | `/api/ai/config` | ✓ | 保存 AI API 配置（`api_key` 留空表示不修改） |
+| POST | `/api/ai/test` | ✓ | 测试 AI API 连通性，返回 `{ok, model, provider}` 或错误 |
+| POST | `/api/ai/chat` | ✓ | 内置助手聊天（后端工具循环，返回 `{reply, tool_trace}`；上限 8 轮） |
+| GET | `/api/ai/mcp/status` | ✓ | MCP 服务器状态（enabled、令牌脱敏、接入地址） |
+| POST | `/api/ai/mcp/token` | ✓ | 生成/重新生成 MCP 访问令牌（旧令牌立即失效） |
+| POST | `/api/ai/mcp/toggle` | ✓ | 开启/关闭 MCP 服务器端点 |
 
 ### Extensions（规划中，见 4.8.2）
 
@@ -1882,6 +2118,16 @@ WantedBy=multi-user.target
 - 定期备份建议：`tar czf backup_$(date +%F).tar.gz data/`
 - 工作区目录本身在服务器上，不要误删；迁移时只备份 VE 自己管理的部分（`data/`）
 
+### 8.11 SMB 备份（v0.4.4 已实现）
+
+设置页 > 网络和安全 的备份区块（依赖 `pysmb`，`requirements.txt`）：
+
+| 项 | 说明 |
+|----|------|
+| 配置 | `GET/POST /api/backup/smb`：host、share、username、password（GET 不回显密码，返回 `configured`）；存储于 `data/backup_config.json` |
+| 执行 | `POST /api/backup/run`：将 `data/` 打包为 `ve-backup-<时间戳>.tar.gz` 上传至 SMB 共享目录，完成后删除本地临时包 |
+| 入口 | 设置页备份区块「立即备份」按钮；错误（连接失败/未配置）以 toast 提示 |
+
 ---
 
 ## 9. 开发规范
@@ -2052,3 +2298,16 @@ curl -X POST http://localhost:58446/api/auth/init -H 'Content-Type: application/
 2. 实现简单（无需 refresh token 轮转）
 3. 安全性可接受（30 天内每次请求都延长）
 **后果**：令牌有效期较长，吊销需依赖 `token_version` 机制（见 4.1.2）。
+
+#### ADR-005：为什么 MCP 端点手写 JSON-RPC 而不用官方 mcp SDK？
+
+**背景**：AI 扩展需要 MCP Streamable HTTP 端点（见 4.10.3）。
+**选项**：
+- A. 引入官方 `modelcontextprotocol` Python SDK
+- B. 在 Flask 内手写 JSON-RPC 2.0 处理（initialize / tools/list / tools/call / ping）
+**决策**：选 B。
+**理由**：
+1. 零新依赖：SDK 连带 pydantic、anyio、httpx 等一串包，违背极简部署原则（Orange Pi / 最小侵入部署，见 8.9）
+2. VE 只需要 tools 单一能力 + 无状态会话，协议面很小，手写约 200 行可控
+3. Streamable HTTP 规范允许服务器以 `application/json` 非流式响应，Flask 原生即可承载
+**后果**：需自行跟进 MCP 规范版本演进（当前协商支持 2024-11-05 / 2025-03-26 / 2025-06-18）；不支持 SSE 流式响应与资源/提示词能力，后续需要时再评估引入 SDK。

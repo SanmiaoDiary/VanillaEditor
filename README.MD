@@ -11,6 +11,7 @@
 - **版本管理** — 每次编辑自动记录 Git 提交，随时回溯历史版本
 - **原地工作区** — 直接将服务器上的授权目录作为工作区打开，编辑实时生效，不复制数据（规划中，当前为复制模式，见 UI_STATUS.md）
 - **多用户权限体系** — 超级管理员 / 管理员 / 普通用户三级权限，各用户工作区相互隔离、数据私有（规划中）
+- **AI 助手** — 内置 AI 聊天（OpenAI 兼容 API）+ MCP 服务器：外部 AI 客户端（ZCode、Claude Desktop 等）经 14 个工具直接写作、编辑、同步和版本管理（DESIGN 4.10）
 
 > 当前实现进度与设计目标的差异见 [UI_STATUS.md](./UI_STATUS.md)。
 
@@ -75,8 +76,9 @@ pip install waitress && waitress-serve --host 0.0.0.0 --port 58446 run:app
 VanillaEditor/
 ├── app/                  # Flask 后端
 │   ├── routes.py         # 所有 API 路由（单一入口）
-│   └── git/
-│       └── service.py    # Git 操作封装
+│   ├── git/
+│   │   └── service.py    # Git 操作封装
+│   └── ai/               # AI 助手与 MCP 服务器（tools/mcp/provider）
 ├── static/               # 前端（无需构建）
 │   ├── index.html        # 页面骨架
 │   ├── css/app.css       # 自定义样式
@@ -114,6 +116,10 @@ VanillaEditor/
 | `POST` | `/api/git/reset` | 回退到指定提交 |
 | `GET` | `/api/access/status` | 远程访问状态 |
 | `POST` | `/api/access/enable` / `disable` | 开关远程访问（开启需认证口令，见 DESIGN 4.5.1） |
+| `POST` | `/api/mcp` | MCP 服务器端点（Streamable HTTP，令牌鉴权，DESIGN 4.10.3） |
+| `GET/POST` | `/api/ai/config` | AI API 配置读取/保存（key 不回显） |
+| `POST` | `/api/ai/chat` | 内置 AI 助手聊天（后端工具循环） |
+| `GET/POST` | `/api/ai/mcp/*` | MCP 服务器状态 / 令牌生成 / 开关 |
 
 ## 许可
 

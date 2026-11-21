@@ -1,5 +1,5 @@
 ﻿// ── Version（单点定义，状态栏/关于页/登录页共用）──────────────
-const VE_VERSION = 'v0.4.4';
+const VE_VERSION = 'v0.5.0';
 
 // ── Router ───────────────────────────────────────────────────
 const Router = {
@@ -43,6 +43,9 @@ let mobilePreviewMode = localStorage.getItem('ve_mobile_preview') === '1';
 let expandedWorkspaces = {};
 let openTabs = [];
 let activeTabId = null;
+// AI 助手扩展（DESIGN 4.10 / 3.3.5）：聊天历史仅存内存，刷新即清
+let aiChat = { messages: [], busy: false, ctxFile: true, ctxSelection: false };
+let aiState = { cfg: null, mcp: null, lastToken: '' };
 document.documentElement.style.setProperty('--ed-font-size', fontSize + 'px');
 
 // ── API ──────────────────────────────────────────────────────
@@ -1437,6 +1440,7 @@ function extensionsPanel() {
     { id: 'autosave', name: '自动保存', desc: '停止输入 1.5 秒后自动保存', def: true },
     { id: 'spellcheck', name: '拼写检查', desc: '中英文基础拼写提示（规划）', def: false },
     { id: 'motivation', name: '创作激励', desc: 'ESP-32摆件联动 + 写作热力图', def: false },
+    { id: 'ai', name: 'AI 助手', desc: '编辑器内 AI 聊天 + MCP 服务器（外部 AI 接入，DESIGN 4.10）', def: false },
   ];
   return '<div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom border-secondary-subtle">' +
       '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">扩展</span>' +
@@ -1472,6 +1476,285 @@ function toggleExt(id, on) {
     return;
   }
   renderEditor();
+}
+
+// ── AI 助手扩展（DESIGN 3.3.5 / 4.10）────────────────────────
+
+function aiExtEnabled() {
+  return localStorage.getItem('ve_ext_ai') === '1';
+}
+
+async function aiLoadState() {
+  // 拉取 AI API 配置与 MCP 状态（聊天面板与设置页共用缓存）
+  const cfg = await apiFetch('/ai/config');
+  const mcp = await apiFetch('/ai/mcp/status');
+  if (cfg) aiState.cfg = cfg;
+  if (mcp) aiState.mcp = mcp;
+  aiRenderPanel();
+}
+
+function aiTraceBlock(trace) {
+  const rows = trace.map(x =>
+    '<div class="ve-ai-trace-row' + (x.ok ? '' : ' ve-ai-trace-err') + '">' +
+      '<i class="bi bi-' + (x.ok ? 'check2-circle' : 'x-octagon') + '"></i>' +
+      '<code>' + esc(x.tool) + '</code>' +
+      '<span class="text-secondary">' + x.ms + 'ms</span>' +
+    '</div>').join('');
+  return '<details class="ve-ai-trace"><summary><i class="bi bi-terminal me-1"></i>工具调用 ' + trace.length + ' 次</summary>' + rows + '</details>';
+}
+
+function aiBubble(m, idx) {
+  if (m.role === 'user') {
+    return '<div class="ve-ai-msg ve-ai-msg-user"><div class="ve-ai-bubble">' + esc(m.content) + '</div></div>';
+  }
+  const trace = (m.trace && m.trace.length) ? aiTraceBlock(m.trace) : '';
+  const ops = m.pending ? '' :
+    '<div class="ve-ai-ops">' +
+      '<button class="btn btn-sm btn-outline-secondary py-0" onclick="aiCopyReply(' + idx + ')"><i class="bi bi-clipboard me-1"></i>复制</button>' +
+      '<button class="btn btn-sm btn-outline-secondary py-0" onclick="aiInsertReply(' + idx + ')"><i class="bi bi-box-arrow-in-down me-1"></i>插入光标</button>' +
+      '<button class="btn btn-sm btn-outline-secondary py-0" onclick="aiReplaceSel(' + idx + ')"><i class="bi bi-arrow-left-right me-1"></i>替换选区</button>' +
+    '</div>';
+  return '<div class="ve-ai-msg ve-ai-msg-ai"><div class="ve-ai-bubble">' +
+    (m.pending ? '<span class="spinner-border spinner-border-sm me-1"></span><span class="text-secondary">思考中…</span>' : parseMd(m.content || '')) +
+    trace + ops + '</div></div>';
+}
+
+function aiPanel() {
+  const head = '<div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom border-secondary-subtle">' +
+      '<span class="text-uppercase text-secondary" style="font-size:11px;letter-spacing:1px">AI 助手</span>' +
+      (aiChat.messages.length ? '<button class="btn btn-sm btn-outline-secondary py-0" title="清空会话" onclick="aiClearChat()"><i class="bi bi-eraser"></i></button>' : '') +
+    '</div>';
+  if (!aiExtEnabled()) {
+    return head +
+      '<div class="ve-scroll p-3 text-secondary small">在「扩展」面板启用「AI 助手」后，这里提供编辑器内 AI 聊天：AI 可直接读写工作区文件、提交版本、同步远端（DESIGN 4.10）。</div>';
+  }
+  if (!aiState.cfg || !aiState.mcp) {
+    aiLoadState();
+    return head + '<div class="ve-scroll p-3 text-secondary small">加载配置中…</div>';
+  }
+  const apiReady = aiState.cfg.has_api_key && aiState.cfg.base_url && aiState.cfg.model;
+  if (!apiReady) {
+    return head +
+      '<div class="ve-scroll p-3">' +
+        '<div class="text-secondary small mb-3">尚未配置 AI API。在设置页填写 OpenAI 兼容接口（Base URL、API Key、模型名）后即可开始聊天，AI 将能够直接操作你的工作区。</div>' +
+        '<button class="btn btn-sm btn-outline-primary w-100" onclick="aiGoSettings()"><i class="bi bi-gear me-1"></i>去设置</button>' +
+      '</div>';
+  }
+  const msgs = aiChat.messages.length ?
+    aiChat.messages.map((m, i) => aiBubble(m, i)).join('') :
+    '<div class="text-secondary small px-3 py-2">向 AI 描述你想做的事，例如：<br>「把当前文件开头改得更有悬念」<br>「新建 weekly-review.md 写本周复盘模板」<br>「提交当前修改」</div>' +
+    (aiChat.busy ? aiBubble({ role: 'assistant', pending: true }, -1) : '');
+  const busyMsg = (aiChat.busy && aiChat.messages.length) ?
+    aiBubble({ role: 'assistant', pending: true }, -1) : '';
+  return head +
+    '<div class="ve-ai-scroll ve-scroll flex-grow-1">' + msgs + busyMsg + '</div>' +
+    '<div class="ve-ai-input px-3 py-2 border-top border-secondary-subtle">' +
+      '<div class="d-flex gap-3 mb-2 small">' +
+        '<div class="form-check mb-0"><input class="form-check-input" type="checkbox" id="veAiCtxFile" ' + (aiChat.ctxFile ? 'checked' : '') + ' onchange="aiChat.ctxFile=this.checked"><label class="form-check-label" for="veAiCtxFile">附加当前文件</label></div>' +
+        '<div class="form-check mb-0"><input class="form-check-input" type="checkbox" id="veAiCtxSel" ' + (aiChat.ctxSelection ? 'checked' : '') + ' onchange="aiChat.ctxSelection=this.checked"><label class="form-check-label" for="veAiCtxSel">仅选区</label></div>' +
+      '</div>' +
+      '<div class="d-flex gap-2">' +
+        '<textarea class="form-control form-control-sm" id="veAiInput" rows="2" placeholder="向 AI 描述任务，Enter 发送…" onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();aiSend();}"></textarea>' +
+        '<button class="btn btn-sm btn-primary align-self-end" onclick="aiSend()" title="发送"' + (aiChat.busy ? ' disabled' : '') + '><i class="bi bi-send"></i></button>' +
+      '</div>' +
+      (aiState.mcp.mcp_enabled ? '<div class="text-secondary mt-2" style="font-size:10px"><i class="bi bi-plug me-1"></i>MCP 服务器已开启（外部 AI 客户端可接入，管理见设置页）</div>' : '') +
+    '</div>';
+}
+
+function aiRenderPanel() {
+  if (location.hash !== '#/editor' || activePanel !== 'ai') return;
+  const panel = document.querySelector('#veSidebar .panel');
+  if (!panel) return;
+  panel.innerHTML = aiPanel();
+  const input = document.getElementById('veAiInput');
+  if (input && !aiChat.busy) input.focus();
+  const box = panel.querySelector('.ve-ai-scroll');
+  if (box) box.scrollTop = box.scrollHeight;
+}
+
+async function aiSend() {
+  if (aiChat.busy) return;
+  const input = document.getElementById('veAiInput');
+  if (!input) return;
+  const text = (input.value || '').trim();
+  if (!text) return;
+  let context = null;
+  if (aiChat.ctxSelection) {
+    const ta = document.getElementById('veEditor');
+    const sel = ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd) : '';
+    if (sel) context = { selection: sel, path: editor.activeFilePath, doc_id: editor.activeDocId };
+  } else if (aiChat.ctxFile && editor.activeDocId && editor.content) {
+    context = { content: editor.content, path: editor.activeFilePath, doc_id: editor.activeDocId };
+  }
+  aiChat.messages.push({ role: 'user', content: text });
+  aiChat.busy = true;
+  aiRenderPanel();
+  try {
+    const r = await apiFetch('/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        messages: aiChat.messages.map(m => ({ role: m.role, content: m.content })),
+        context,
+      }),
+    });
+    if (!r || r.error) {
+      aiChat.messages.push({ role: 'assistant', content: '（请求失败：' + ((r && r.error) || '未知错误') + '）' });
+    } else {
+      aiChat.messages.push({ role: 'assistant', content: r.reply || '', trace: r.tool_trace || [] });
+    }
+  } catch (e) {
+    aiChat.messages.push({ role: 'assistant', content: '（请求异常：' + e.message + '）' });
+  }
+  aiChat.busy = false;
+  aiRenderPanel();
+}
+
+function aiApplyToEditor(text, mode) {
+  const ta = document.getElementById('veEditor');
+  if (!ta) return toast('请先回到编辑器', 'err');
+  if (mode === 'replace' && ta.selectionStart === ta.selectionEnd) return toast('当前无选区，请先选中文字', 'err');
+  const s = ta.selectionStart, e = ta.selectionEnd;
+  ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
+  ta.selectionStart = ta.selectionEnd = s + text.length;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  toast(mode === 'replace' ? '已替换选区' : '已插入到光标处', 'ok');
+}
+
+function aiCopyReply(idx) {
+  const m = aiChat.messages[idx];
+  if (!m) return;
+  navigator.clipboard.writeText(m.content || '').then(
+    () => toast('已复制', 'ok'),
+    () => toast('复制失败', 'err'));
+}
+
+function aiInsertReply(idx) {
+  const m = aiChat.messages[idx];
+  if (m) aiApplyToEditor(m.content || '', 'insert');
+}
+
+function aiReplaceSel(idx) {
+  const m = aiChat.messages[idx];
+  if (m) aiApplyToEditor(m.content || '', 'replace');
+}
+
+function aiClearChat() {
+  showConfirm('清空会话', '将清空当前聊天历史（仅存内存，不影响工作区文件）。', () => {
+    aiChat.messages = [];
+    aiRenderPanel();
+  });
+}
+
+async function aiGoSettings() {
+  currentSettingTab = 'ai';
+  Router.go('#/setting');
+}
+
+// ── 设置页 AI 助手组（DESIGN 3.4 AI 助手）────────────────────
+
+async function loadAiSettings() {
+  const cfg = await apiFetch('/ai/config');
+  const mcp = await apiFetch('/ai/mcp/status');
+  if (cfg) aiState.cfg = cfg;
+  if (mcp) aiState.mcp = mcp;
+  const apiBody = document.getElementById('veAiApiBody');
+  if (apiBody && cfg) {
+    apiBody.innerHTML =
+      '<div class="mb-2"><label class="form-label small fw-semibold mb-1">Base URL</label>' +
+        '<input class="form-control form-control-sm" id="veAiBaseUrl" placeholder="https://api.deepseek.com/v1" value="' + esc(cfg.base_url || '') + '"></div>' +
+      '<div class="mb-2"><label class="form-label small fw-semibold mb-1">API Key</label>' +
+        '<input class="form-control form-control-sm" id="veAiApiKey" type="password" placeholder="' + (cfg.has_api_key ? '已保存（留空表示不修改）' : 'sk-…') + '"></div>' +
+      '<div class="row g-2 mb-3"><div class="col-7"><label class="form-label small fw-semibold mb-1">模型</label>' +
+        '<input class="form-control form-control-sm" id="veAiModel" placeholder="deepseek-chat" value="' + esc(cfg.model || '') + '"></div>' +
+      '<div class="col-5"><label class="form-label small fw-semibold mb-1">温度（0–2）</label>' +
+        '<input class="form-control form-control-sm" id="veAiTemp" type="number" step="0.1" min="0" max="2" value="' + (typeof cfg.temperature === 'number' ? cfg.temperature : 0.7) + '"></div></div>' +
+      '<div class="d-flex gap-2 align-items-center">' +
+        '<button class="btn btn-sm btn-outline-secondary" onclick="testAiConn()"><i class="bi bi-lightning me-1"></i>测试连接</button>' +
+        '<button class="btn btn-sm btn-primary" onclick="saveAiSettings()"><i class="bi bi-save me-1"></i>保存配置</button>' +
+        '<span class="small text-secondary" id="veAiTestResult"></span>' +
+      '</div>';
+  }
+  const mcpBody = document.getElementById('veAiMcpBody');
+  if (mcpBody && mcp) {
+    mcpBody.innerHTML =
+      '<div class="form-check form-switch mb-2">' +
+        '<input class="form-check-input" type="checkbox" role="switch" id="veMcpEnabled" ' + (mcp.mcp_enabled ? 'checked' : '') + ' onchange="toggleMcpServer(this.checked)">' +
+        '<label class="form-check-label small" for="veMcpEnabled">开启 MCP 服务器（外部 AI 客户端经 /api/mcp 访问，令牌鉴权）</label>' +
+      '</div>' +
+      (mcp.mcp_enabled ?
+        '<div class="small mb-1">接入地址：<code id="veMcpEndpoint">' + esc(mcp.endpoint || '') + '</code> ' +
+          '<button class="btn btn-sm btn-outline-secondary py-0" onclick="aiCopyText(document.getElementById(\'veMcpEndpoint\').textContent)"><i class="bi bi-clipboard"></i></button></div>' +
+        '<div class="small mb-2">访问令牌：' + (mcp.has_token ? '<code>' + esc(mcp.token_masked || 've-ai-…') + '</code>' : '<span class="text-warning">未生成</span>') +
+          ' <button class="btn btn-sm btn-outline-secondary py-0" onclick="regenMcpToken()">重新生成令牌</button></div>' +
+        '<div class="small text-secondary mb-1">客户端配置示例（ZCode / 通用 Streamable HTTP）：</div>' +
+        '<pre class="border border-secondary-subtle rounded p-2 mb-2" style="font-size:11px" id="veMcpExample">' + esc(mcpExampleJson()) + '</pre>' +
+        '<button class="btn btn-sm btn-outline-secondary" onclick="aiCopyText(document.getElementById(\'veMcpExample\').textContent)"><i class="bi bi-clipboard me-1"></i>复制配置示例</button>' +
+        '<div class="text-secondary mt-2" style="font-size:10px">完整令牌仅在生成时显示一次；远程访问关闭时 MCP 仅限本机来源（DESIGN 4.10.3）。</div>' : '') +
+    '';
+  }
+}
+
+function mcpExampleJson() {
+  const ep = (aiState.mcp && aiState.mcp.endpoint) || 'http://<主机地址>:58446/api/mcp';
+  const tok = aiState.lastToken || 've-ai-…（粘贴你生成时保存的完整令牌）';
+  return JSON.stringify({ mcpServers: { vanillaeditor: { url: ep, headers: { Authorization: 'Bearer ' + tok } } } }, null, 2);
+}
+
+async function saveAiSettings() {
+  const body = {
+    base_url: document.getElementById('veAiBaseUrl').value.trim(),
+    model: document.getElementById('veAiModel').value.trim(),
+    temperature: parseFloat(document.getElementById('veAiTemp').value),
+    api_key: document.getElementById('veAiApiKey').value,
+  };
+  const r = await apiFetch('/ai/config', { method: 'POST', body: JSON.stringify(body) });
+  if (r && !r.error) toast('AI 配置已保存', 'ok');
+  else toast('保存失败：' + ((r && r.error) || '未知错误'), 'err');
+  await loadAiSettings();
+}
+
+async function testAiConn() {
+  const el = document.getElementById('veAiTestResult');
+  if (el) el.textContent = '测试中…';
+  const r = await apiFetch('/ai/test', {
+    method: 'POST',
+    body: JSON.stringify({
+      base_url: document.getElementById('veAiBaseUrl').value.trim(),
+      model: document.getElementById('veAiModel').value.trim(),
+      api_key: document.getElementById('veAiApiKey').value,
+    }),
+  });
+  if (el) el.textContent = (r && r.ok) ? ('✓ 连接成功：' + (r.model || '') + (r.provider ? '（' + r.provider + '）' : '')) : ('✗ ' + ((r && r.error) || '连接失败'));
+}
+
+async function toggleMcpServer(on) {
+  const r = await apiFetch('/ai/mcp/toggle', { method: 'POST', body: JSON.stringify({ enabled: on }) });
+  if (r && !r.error) {
+    if (r.token) showNewToken(r.token);
+    toast('MCP 服务器已' + (on ? '开启' : '关闭'), 'ok');
+  } else toast('操作失败：' + ((r && r.error) || '未知错误'), 'err');
+  await loadAiSettings();
+}
+
+function regenMcpToken() {
+  showConfirm('重新生成 MCP 令牌', '旧令牌将立即失效，已接入的外部 AI 客户端需要更新配置。确定继续？', async () => {
+    const r = await apiFetch('/ai/mcp/token', { method: 'POST', body: '{}' });
+    if (r && r.token) showNewToken(r.token);
+    await loadAiSettings();
+  });
+}
+
+function showNewToken(token) {
+  aiState.lastToken = token;
+  showModal('MCP 访问令牌（仅显示一次）',
+    '<div class="small text-secondary mb-2">请立即复制保存。此后只显示脱敏形式，丢失只能重新生成。</div>' +
+    '<pre class="border border-secondary-subtle rounded p-2 mb-2" style="font-size:12px;word-break:break-all" id="veNewMcpToken">' + esc(token) + '</pre>',
+    '<button class="btn btn-sm btn-outline-secondary" onclick="aiCopyText(document.getElementById(\'veNewMcpToken\').textContent)"><i class="bi bi-clipboard me-1"></i>复制</button>' +
+    '<button class="btn btn-sm btn-primary" data-bs-dismiss="modal">完成</button>');
+}
+
+function aiCopyText(t) {
+  navigator.clipboard.writeText(t || '').then(() => toast('已复制', 'ok'), () => toast('复制失败', 'err'));
 }
 
 function toggleAutoSync(on) {
@@ -1899,7 +2182,7 @@ function renderEditor() {
     '<div class="d-flex flex-grow-1 overflow-hidden">' +
       '<aside class="offcanvas-lg offcanvas-start border-end border-secondary-subtle ve-sidebar" tabindex="-1" id="veSidebar" aria-labelledby="veSidebarLabel">' +
         '<div class="offcanvas-header d-lg-none py-1 border-bottom border-secondary-subtle">' +
-          '<span class="text-uppercase text-secondary" id="veSidebarLabel" style="font-size:11px">' + (activePanel === 'git' ? 'Git' : activePanel === 'sync' ? '同步' : activePanel === 'extensions' ? '扩展' : '资源管理器') + '</span>' +
+          '<span class="text-uppercase text-secondary" id="veSidebarLabel" style="font-size:11px">' + (activePanel === 'git' ? 'Git' : activePanel === 'sync' ? '同步' : activePanel === 'extensions' ? '扩展' : activePanel === 'ai' ? 'AI 助手' : '资源管理器') + '</span>' +
           '<button type="button" class="btn-close" id="veSidebarClose" aria-label="关闭"></button>' +
         '</div>' +
         '<div class="offcanvas-body d-flex p-0">' +
@@ -1908,11 +2191,13 @@ function renderEditor() {
             '<div class="ib' + (activePanel === 'git' ? ' on' : '') + '" title="版本管理 Git" onclick="setPanel(\'git\')"><i class="bi bi-git"></i></div>' +
             '<div class="ib' + (activePanel === 'sync' ? ' on' : '') + '" title="同步" onclick="setPanel(\'sync\')"><i class="bi bi-arrow-repeat"></i></div>' +
             '<div class="ib' + (activePanel === 'extensions' ? ' on' : '') + '" title="扩展" onclick="setPanel(\'extensions\')"><i class="bi bi-puzzle"></i></div>' +
+            (localStorage.getItem('ve_ext_ai') === '1' ?
+              '<div class="ib' + (activePanel === 'ai' ? ' on' : '') + '" title="AI 助手" onclick="setPanel(\'ai\')"><i class="bi bi-stars"></i></div>' : '') +
             '<div class="flex-grow-1"></div>' +
             '<div class="ib" title="设置" onclick="Router.go(\'#/setting\')"><i class="bi bi-gear"></i></div>' +
             '<div class="ib" title="' + esc(auth.username) + '" onclick="Router.go(\'#/setting\')"><i class="bi bi-person-circle"></i></div>' +
           '</div>' +
-          '<div class="panel">' + (activePanel === 'git' ? gitPanel : activePanel === 'sync' ? syncPanel() : activePanel === 'extensions' ? extensionsPanel() : filesPanel) + '</div>' +
+          '<div class="panel">' + (activePanel === 'git' ? gitPanel : activePanel === 'sync' ? syncPanel() : activePanel === 'extensions' ? extensionsPanel() : activePanel === 'ai' ? aiPanel() : filesPanel) + '</div>' +
         '</div>' +
       '</aside>' +
       '<div class="ve-resizer ve-resizer-v d-none d-lg-block" id="veSidebarResizer" title="拖动调整侧边栏宽度"></div>' +
@@ -1922,6 +2207,8 @@ function renderEditor() {
           '<button class="btn btn-sm btn-outline-secondary py-0 d-lg-none" onclick="setPanel(\'git\')" title="Git 面板"><i class="bi bi-git"></i></button>' +
           '<button class="btn btn-sm btn-outline-secondary py-0 d-lg-none" onclick="setPanel(\'sync\')" title="同步"><i class="bi bi-arrow-repeat"></i></button>' +
           '<button class="btn btn-sm btn-outline-secondary py-0 d-lg-none" onclick="setPanel(\'extensions\')" title="扩展"><i class="bi bi-puzzle"></i></button>' +
+          (localStorage.getItem('ve_ext_ai') === '1' ?
+            '<button class="btn btn-sm btn-outline-secondary py-0 d-lg-none" onclick="setPanel(\'ai\')" title="AI 助手"><i class="bi bi-stars"></i></button>' : '') +
           '<span class="ms-auto">' +
             '<button class="btn btn-sm btn-outline-secondary py-0 d-md-none" id="vePreviewToggle" onclick="toggleMobilePreview()" title="切换预览/编辑">' +
               '<i class="bi bi-' + (mobilePreviewMode ? 'pencil' : 'eye') + '"></i>' +
@@ -2093,6 +2380,7 @@ async function renderSetting() {
     { id: 'account', icon: 'bi-person-badge', label: '账号管理' },
     { id: 'appearance', icon: 'bi-palette', label: '外观' },
     { id: 'network', icon: 'bi-shield-lock', label: '网络和安全' },
+    { id: 'ai', icon: 'bi-stars', label: 'AI 助手' },
     { id: 'git', icon: 'bi-git', label: 'Git' },
     { id: 'about', icon: 'bi-info-circle', label: '关于' },
   ];
@@ -2204,12 +2492,15 @@ async function renderSetting() {
     loadRemoteListIntoSetting();
     loadAccessControl();
   }
+  if (currentSettingTab === 'ai') {
+    loadAiSettings();
+  }
 }
 
 function switchSettingTab(tab) {
   currentSettingTab = tab;
   const items = document.querySelectorAll('.ve-setting-menu-item');
-  const menuIds = ['workspace', 'account', 'appearance', 'network', 'git', 'about'];
+  const menuIds = ['workspace', 'account', 'appearance', 'network', 'ai', 'git', 'about'];
   items.forEach((el, i) => {
     const isActive = menuIds[i] === tab;
     el.className = 've-setting-menu-item px-3 py-2 cursor-pointer d-flex align-items-center gap-2' +
@@ -2357,6 +2648,15 @@ function renderSettingContent(tab) {
           '<label class="form-check-label small" for="veShowHidden">显示隐藏文件（. 开头的文件和文件夹）</label>' +
         '</div>' +
       '</div>' +
+    '</div>';
+  }
+  if (tab === 'ai') {
+    // AI 助手设置（DESIGN 3.4 AI 助手组 / 4.10）：API 配置卡 + MCP 服务器卡，内容异步填充
+    return '<div class="card h-100" style="max-width:640px">' +
+      '<div class="card-header bg-transparent border-secondary-subtle"><i class="bi bi-stars me-1"></i>AI API（OpenAI 兼容）</div>' +
+      '<div class="card-body" id="veAiApiBody"><div class="text-secondary small">加载中…</div></div>' +
+      '<div class="card-header bg-transparent border-secondary-subtle border-top"><i class="bi bi-plug me-1"></i>MCP 服务器（外部 AI 客户端接入）</div>' +
+      '<div class="card-body" id="veAiMcpBody"><div class="text-secondary small">加载中…</div></div>' +
     '</div>';
   }
   if (tab === 'network') {

@@ -27,6 +27,10 @@
 
 ## 更新日志
 
+### v0.5.0 — 2026-11-21
+
+**feat:** AI 助手扩展（DESIGN 4.10）——一个工具执行层、两个 AI 入口：MCP 服务器（`/api/mcp` 手写 Streamable HTTP JSON-RPC、14 工具、独立长效访问令牌，外部 AI 客户端接入）+ 内置 AI 助手（侧边栏聊天面板、OpenAI 兼容、后端工具循环上限 8 轮、工具轨迹折叠、复制/插入/替换选区）+ 设置页 AI 组（菜单 6→7 组，API 配置 + MCP 管理）；`GitService.diff_worktree` 补未提交 diff 缺口；顺带补齐 v0.4.4 遗留文档（DESIGN 8.11 SMB 备份、4.9.3 ESP-32、Stats 已实现口径修正）
+
 ### v0.4.4 — 2026-11-15
 
 **fix:** 移动端三问题——扩展开关后 offcanvas backdrop 残留锁死页面（抽屉打开时延迟重绘+防御清理）、工具条资源管理器按钮图标与点击无效（setPanel 改原生 Offcanvas API）、textarea 未填满（100dvh + pane min-height:0）
